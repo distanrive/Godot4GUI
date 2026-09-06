@@ -1,0 +1,48 @@
+# ---------- Godot 4 ----------
+# 引擎缓存与导入产物（均可重建，勿提交）
+.godot/
+
+# 编辑器生成的翻译文件
+*.translation
+
+# 本地导出产物
+/export/
+/out/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.iml
+
+# ---------- 系统 / 杂项 ----------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ---------- Claude Code 本地状态 ----------
+# 项目级共享指令在根目录 CLAUDE.md（保留追踪）；.claude/ 为本地工具状态
+.claude/
+
+docs/
