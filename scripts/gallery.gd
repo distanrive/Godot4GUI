@@ -9,6 +9,7 @@ var _sections: Dictionary = {}       # id -> 已构建的 section 容器（切�
 var _section_box: VBoxContainer      # 当前正在构建的 section 容器（构建期间非 null）
 var _chart: TrendChart               # 图表展示实例（首次构建图表分类后持续存在）
 var _multi: MultiTrendChart           # 多子图展示实例
+var _map: IntensityMap                # 伪彩强度图展示实例
 var _progress: ProgressBar            # 进度条展示实例
 var _chart_t := 0.0                  # 图表本地演示数据相位
 var _multi_t := 0.0                  # 多子图本地演示数据相位
@@ -54,7 +55,7 @@ func _build() -> void:
 
 	var nav_title := Label.new()
 	nav_title.text = "控件分类"
-	nav_title.add_theme_font_size_override("font_size", 16)
+	nav_title.theme_type_variation = "SectionTitle"
 	nav.add_child(nav_title)
 
 	var sections := [
@@ -121,14 +122,15 @@ func _show_section(id: String) -> void:
 func _header(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", 20)
+	l.theme_type_variation = "SectionTitle"   # 字号走主题变体，全局可调
 	return l
 
 
 func _caption(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.theme_type_variation = "Subtitle"
+	l.theme_type_variation = "Caption"
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	return l
 
 
@@ -153,6 +155,27 @@ func _card(title: String, content: Control) -> Control:
 	vb.add_child(content)
 	p.add_child(vb)
 	return p
+
+
+## 造一份「先聚焦后发散 + 干涉条纹」的假数据喂给 IntensityMap，
+## 让伪彩图在没有后端时也能看出效果（真实用法见 scripts/main.gd 的衍射演示）。
+func _fill_demo_map(map: IntensityMap, cols: int, rows: int) -> void:
+	map.setup(cols, rows)
+	map.unit_scale = 1.0        # 演示数据是任意单位，不做 m → μm 换算
+	map.unit_suffix = ""
+	map.set_z_range(0.0, 8.0)
+	map.set_y_range(-1.0, 1.0)
+	for c in cols:
+		var z := float(c) / float(cols - 1)
+		var w := 0.02 + absf(z - 0.42) * 0.55          # 束宽：先收后放
+		var col := PackedFloat32Array()
+		col.resize(rows)
+		for r in rows:
+			var y := (float(r) / float(rows - 1) - 0.5) * 2.0
+			var v := exp(-(y * y) / (2.0 * w * w))
+			v *= 1.0 + 0.35 * cos(y * 26.0 * (1.0 - z))   # 干涉条纹
+			col[r] = maxf(v, 0.0)
+		map.set_column(c, col)
 
 
 ## 堆叠分页演示用页面：居中文本的占位页。
@@ -313,7 +336,10 @@ func _section_labels() -> void:
 	vb.add_child(t1)
 	vb.add_child(t2)
 	_section_box.add_child(_card("标签类型", vb))
-	_section_box.add_child(_caption("彩色标签用 font_color 覆盖；链接用 RichTextLabel 的 [url] 标签 + meta_clicked。"))
+	_section_box.add_child(_caption(
+		"彩色标签：一次性场合可用 add_theme_color_override 就地改色（上面那排）；"
+		+ "有语义的固定状态请用类型变体 StatusOk / StatusWarn / StatusError（改一处全局生效）。"
+		+ " 链接用 RichTextLabel 的 [url] 标签 + meta_clicked 信号。"))
 
 
 ## 链接标签点击回调：网页 URL 直接打开，本地路径（OPEN_LOG_DIR）打开日志目录。
@@ -353,6 +379,24 @@ func _section_inputs() -> void:
 	vb.add_child(_sized(le, 260))
 
 	_section_box.add_child(_card("LineEdit / SpinBox / 带标签输入框（固定宽度）", vb))
+
+	# 文件拖放框：拖入即输入路径，中间按钮调系统文件资源管理器
+	var drop := FileDropBox.new()
+	drop.hint_text = "把文件拖到这里，或"
+	drop.filters = PackedStringArray(["*.json ; JSON 文件", "*.py ; Python 脚本", "* ; 所有文件"])
+	var drop_out := Label.new()
+	drop_out.theme_type_variation = "PathLabel"
+	drop_out.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	drop_out.text = "path_changed → （尚未选择）"
+	drop.path_changed.connect(func(p: String): drop_out.text = "path_changed → " + p)
+	var drop_box := VBoxContainer.new()
+	drop_box.add_theme_constant_override("separation", 6)
+	drop_box.add_child(drop)
+	drop_box.add_child(drop_out)
+	_section_box.add_child(_card("文件拖放框 FileDropBox（虚线外框 + 选择文件按钮）", drop_box))
+	_section_box.add_child(_caption(
+		"拖放框把「拖入文件」和「点按钮选文件」统一成同一个结果：一个路径（path_changed 信号）。"
+		+ " use_native_dialog = true 时调起系统资源管理器，false 时用 Godot 内置对话框（跟随全局主题）。"))
 
 
 func _section_selection() -> void:
@@ -558,7 +602,7 @@ func _section_containers() -> void:
 	rc_title.theme_type_variation = "CardTitle"
 	var rc_value := Label.new()
 	rc_value.text = "正常"
-	rc_value.add_theme_color_override("font_color", ThemePalette.SUCCESS)
+	rc_value.theme_type_variation = "StatusOk"   # 语义状态色，别用 modulate 染深色文字
 	rch.add_child(rc_title)
 	rch.add_child(rc_value)
 	rowcard.add_child(rch)
@@ -609,6 +653,32 @@ func _section_chart() -> void:
 	_multi.add_plot("流量 L/min", 0.0, 40.0)
 	_section_box.add_child(_card("多子图 MultiTrendChart（共享 X 轴）", _multi))
 	_section_box.add_child(_caption("MultiTrendChart 垂直堆叠多个子图，共享时间轴、各自独立 Y 轴与曲线配色。"))
+
+	# 伪彩强度图（IntensityMap）：本地造一份「聚焦 + 干涉条纹」的假数据
+	_map = IntensityMap.new()
+	_map.title = "伪彩强度图（本地演示数据）"
+	_map.x_label = "Z"
+	_map.y_label = "Y"
+	_map.colorbar_label = "归一化强度"
+	_map.custom_minimum_size = Vector2(0, 300)
+	_fill_demo_map(_map, 160, 90)
+	_section_box.add_child(_card("伪彩强度图 IntensityMap（可换配色 / 逐列追加）", _map))
+
+	var cmap_row := HBoxContainer.new()
+	cmap_row.add_theme_constant_override("separation", 8)
+	for name in Colormaps.names():
+		var b := Button.new()
+		b.text = name
+		b.theme_type_variation = "CapsuleButton"
+		b.pressed.connect(func():
+			_map.colormap = name
+			_map.queue_redraw())
+		cmap_row.add_child(b)
+	_section_box.add_child(_card("切换配色（Colormaps.names()）", cmap_row))
+	_section_box.add_child(_caption(
+		"IntensityMap 把「标量 → 颜色」交给一块 canvas_item 着色器（themes/shaders/colormap.gdshader），"
+		+ "所以换配色、调显示范围、调伽马都只是改 uniform；数据用 FORMAT_RF 逐列追加，可以边算边画。"
+		+ " 默认色标 rainbow 与 matplotlib 的 cmap='rainbow' 完全一致（见 docs/plotting-alternatives.md）。"))
 
 
 func _section_dialogs() -> void:

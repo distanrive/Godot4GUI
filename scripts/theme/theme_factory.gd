@@ -308,6 +308,25 @@ static func _custom_types(t: Theme) -> void:
 	t.set_color("off_color", "PartitionIndicator", ThemePalette.SURFACE_ALT)
 	t.set_color("border_color", "PartitionIndicator", ThemePalette.BORDER)
 
+	# 伪彩强度图（IntensityMap）
+	t.set_color("background_color", "IntensityMap", ThemePalette.CHART_BG)
+	t.set_color("axis_color", "IntensityMap", ThemePalette.CHART_AXIS)
+	t.set_color("tick_text_color", "IntensityMap", ThemePalette.CHART_TEXT)
+	t.set_color("title_color", "IntensityMap", ThemePalette.TEXT)
+	t.set_color("hover_color", "IntensityMap", ThemePalette.ACCENT)
+	t.set_color("hover_text_color", "IntensityMap", ThemePalette.TEXT_ON_ACCENT)
+	t.set_font_size("tick_font_size", "IntensityMap", ThemePalette.FONT_XS)
+	t.set_font_size("label_font_size", "IntensityMap", ThemePalette.FONT_SM)
+	t.set_font_size("title_font_size", "IntensityMap", ThemePalette.FONT_MD)
+
+	# 文件拖放框（FileDropBox）
+	t.set_color("bg_color", "FileDropBox", ThemePalette.SURFACE)
+	t.set_color("bg_hover_color", "FileDropBox", ThemePalette.SURFACE_ALT)
+	t.set_color("bg_drop_color", "FileDropBox", ThemePalette.ACCENT_SOFT)
+	t.set_color("border_color", "FileDropBox", ThemePalette.BORDER_STRONG)
+	t.set_color("border_hover_color", "FileDropBox", ThemePalette.ACCENT)
+	t.set_color("border_drop_color", "FileDropBox", ThemePalette.ACCENT)
+
 
 # ---------- 类型变体（语义化样式） ----------
 
@@ -329,14 +348,30 @@ static func _type_variations(t: Theme) -> void:
 	# 胶囊按钮（全圆角、带描边）
 	_add_capsule_variation(t)
 
-	# 标签变体
-	t.set_type_variation("CardTitle", "Label")
-	t.set_color("font_color", "CardTitle", ThemePalette.ACCENT)
-	t.set_font_size("font_size", "CardTitle", ThemePalette.FONT_LG)
+	# 标签变体：字号/颜色只在这里定义，业务脚本不要 add_theme_font_size_override
+	# （否则「全局可调」就断了），需要新层级时在这里加一个变体即可。
+	_add_label_variation(t, "PageTitle", ThemePalette.TEXT, ThemePalette.FONT_XXL)
+	_add_label_variation(t, "SectionTitle", ThemePalette.TEXT, ThemePalette.FONT_XL)
+	_add_label_variation(t, "CardTitle", ThemePalette.ACCENT, ThemePalette.FONT_LG)
+	_add_label_variation(t, "Subtitle", ThemePalette.TEXT_SEC, ThemePalette.FONT_SM)
+	_add_label_variation(t, "Caption", ThemePalette.TEXT_SEC, ThemePalette.FONT_XS)
+	_add_label_variation(t, "DropHint", ThemePalette.TEXT_SEC, ThemePalette.FONT_SM)
+	# 路径用等宽感的小字：一眼能看出「这是个文件路径」而不是正文
+	_add_label_variation(t, "PathLabel", ThemePalette.TEXT_SEC, ThemePalette.FONT_XS)
+	_add_label_variation(t, "LogLabel", ThemePalette.TEXT_SEC, ThemePalette.FONT_SM)
 
-	t.set_type_variation("Subtitle", "Label")
-	t.set_color("font_color", "Subtitle", ThemePalette.TEXT_SEC)
-	t.set_font_size("font_size", "Subtitle", ThemePalette.FONT_SM)
+	# 状态标签：用文字色表达状态，**不要用 modulate 染深色文字**（会越乘越暗、读不清）
+	_add_label_variation(t, "StatusIdle", ThemePalette.TEXT_SEC, ThemePalette.FONT_MD)
+	_add_label_variation(t, "StatusOk", ThemePalette.SUCCESS, ThemePalette.FONT_MD)
+	_add_label_variation(t, "StatusWarn", ThemePalette.WARNING, ThemePalette.FONT_MD)
+	_add_label_variation(t, "StatusError", ThemePalette.DANGER, ThemePalette.FONT_MD)
+	_add_label_variation(t, "ValueText", ThemePalette.TEXT, ThemePalette.FONT_MD)
+
+
+static func _add_label_variation(t: Theme, type_name: String, color: Color, size: int) -> void:
+	t.set_type_variation(type_name, "Label")
+	t.set_color("font_color", type_name, color)
+	t.set_font_size("font_size", type_name, size)
 
 
 # ---------- 工具 ----------

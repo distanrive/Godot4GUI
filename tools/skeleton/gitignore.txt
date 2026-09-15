@@ -28,6 +28,11 @@ ENV/
 .ruff_cache/
 .ipynb_checkpoints/
 
+# ---------- 数据 / 日志（按需保留） ----------
+*.log
+/data/
+/output/
+
 # ---------- IDE / 编辑器 ----------
 .idea/
 .vscode/
@@ -44,5 +49,3 @@ Desktop.ini
 # ---------- Claude Code 本地状态 ----------
 # 项目级共享指令在根目录 CLAUDE.md（保留追踪）；.claude/ 为本地工具状态
 .claude/
-
-docs/siliconui-godot-mapping.md

@@ -1,1 +1,4 @@
+# 后端依赖：WebSocket 服务 + 数值计算（Rayleigh-Sommerfeld 衍射模拟）
 websockets>=12.0
+numpy>=1.24
+scipy>=1.10

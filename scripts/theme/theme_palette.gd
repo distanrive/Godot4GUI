@@ -48,6 +48,30 @@ const CHART_AXIS := BORDER_STRONG
 const CHART_TEXT := TEXT_SEC
 const CHART_SERIES := [ACCENT, SUCCESS, WARNING, DANGER]   # 多子图默认曲线配色（循环取用）
 
+# ---------- 色标（colormap） ----------
+# 伪彩图默认色标名；可选名见 scripts/theme/colormaps.gd（rainbow / jet / gray）。
+# "rainbow" 与 matplotlib 的 cmap='rainbow' 完全一致。
+const CMAP_DEFAULT := "rainbow"
+
+# ---------- 伪彩强度图（IntensityMap） ----------
+const IMAP_MARGIN_LEFT := 58.0     # 左侧留给 Y 刻度
+const IMAP_MARGIN_RIGHT := 12.0    # 右侧（不含色标）
+const IMAP_MARGIN_TOP := 26.0      # 顶部留给标题
+const IMAP_MARGIN_BOTTOM := 40.0   # 底部留给 X 刻度 + 轴标签
+const IMAP_COLORBAR_W := 16.0      # 色标条宽度
+const IMAP_COLORBAR_GAP := 34.0    # 色标条与绘图区的间距（放刻度数字）
+const IMAP_COLORBAR_LABEL_OFFSET := 46.0   # 色标文字（竖排）距色标条右缘
+const IMAP_COLORBAR_TICK_W := 34.0         # 色标右侧刻度数字需要的宽度
+const IMAP_COLORBAR_BANDS := 128   # 色标条分段数（越大越平滑）
+const IMAP_AXIS_TICKS := 5         # 每个轴大致刻度数
+const IMAP_READOUT_PAD := 8.0      # 悬停读数气泡的内边距
+
+# ---------- 文件拖放框（FileDropBox） ----------
+const DROPBOX_MIN_H := 108.0       # 未指定时的最小高度
+const DROPBOX_BORDER_W := 2.0      # 虚线粗细
+const DROPBOX_DASH := 7.0          # 虚线段长
+const DROPBOX_GAP := 5.0           # 虚线间隙
+
 # ---------- 圆角 ----------
 const RADIUS_SM := 4
 const RADIUS_MD := 6
@@ -82,3 +106,8 @@ const SEP_BOX := 8            # HBox/VBox 子项间距
 const SEP_GRID := 8           # Grid 间距
 const PAGE_MARGIN := 16       # 页面边距（整个界面到窗口边缘的距离）
 const SEP_SEPARATOR := 4      # 分隔线留白
+
+# ---------- 页面级布局（业务界面用，改这里即可统一缩放） ----------
+const SIDEBAR_W := 320.0        # 左侧参数栏宽度
+const PANEL_MIN_H := 220.0      # 主显示区最小高度
+const TOOLBAR_MIN_H := 28.0     # 工具行最小高度
