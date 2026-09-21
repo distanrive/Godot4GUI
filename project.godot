@@ -23,16 +23,21 @@ config/features=PackedStringArray("4.7")
 
 ThemeManager="*res://scripts/autoload/theme_manager.gd"
 NetClient="*res://scripts/autoload/net_client.gd"
+AppShell="*res://scripts/autoload/app_shell.gd"
+BackendLauncher="*res://scripts/autoload/backend_launcher.gd"
+
+[backend]
+
+python="C:/Users/YH/.conda/envs/normal/python.exe"
+script="res://backend/main.py"
+autostart=true
+kill_on_exit=true
 
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=800
-window/stretch/mode="canvas_items"
-window/stretch/aspect="expand"
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.957, 0.961, 0.969, 1)

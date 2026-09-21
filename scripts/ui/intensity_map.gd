@@ -19,6 +19,9 @@ extends Control
 
 ## 鼠标悬停在图上时给出该点的读数，便于定量看条纹。
 signal cell_hovered(z: float, y: float, value: float)
+## 画布被重置（`setup()` / `clear()`）时发出：此时显示范围已回到「自动」，
+## 界面上那个「自动量程」开关要跟着拨回「开」。
+signal range_reset
 
 @export var colormap := Colormaps.DEFAULT:
 	set(v):
@@ -44,6 +47,7 @@ signal cell_hovered(z: float, y: float, value: float)
 		_relayout()
 
 ## true = 显示范围随数据最大值自动增长（等价于原脚本最后做的「全局归一化」，只是在线进行）。
+## 关掉它就是「冻结当前显示范围」，便于把两幅图放在同一量程下对比。
 @export var auto_range := true
 
 @export var gamma := 1.0:
@@ -137,8 +141,7 @@ func setup(cols: int, rows: int) -> void:
 	_texture = ImageTexture.create_from_image(_image)
 	_view.texture = _texture
 	_view.visible = true
-	display_range = Vector2(0.0, 0.0)
-	_apply_range()
+	_reset_range()
 	_dirty = true
 	set_process(true)
 	_relayout()
@@ -181,15 +184,27 @@ func set_column_b64(index: int, b64: String) -> void:
 	set_column(index, bytes.to_float32_array())
 
 
+## 清空数据（保留画布尺寸）。显示范围一并回到「自动」—— 空画布配一个冻结的旧量程
+## 只会让接下来画出来的东西颜色全错（这也是为什么必须顺手复位 `auto_range`）。
 func clear() -> void:
 	if _image == null:
 		return
 	_image.fill(Color(0, 0, 0, 1))
-	display_range = Vector2(0.0, 0.0)
-	_apply_range()
+	_reset_range()
 	_dirty = true
 	set_process(true)
 	queue_redraw()
+
+
+## 复位显示范围并回到自动量程。**必须同时复位 `auto_range`**：
+## 只把 display_range 清零而留着 auto_range=false 的话，vmax 会落到 1e-30，
+## 所有像素都落到色标最底部 —— 表现就是「整幅图全黑」。界面上有「自动量程」开关之后，
+## 这条路径是用户能主动走到的，所以这里把两件事绑在一起做。
+func _reset_range() -> void:
+	display_range = Vector2(0.0, 0.0)
+	auto_range = true
+	_apply_range()
+	range_reset.emit()
 
 
 func has_data() -> bool:
@@ -218,7 +233,19 @@ func get_display_range() -> Vector2:
 	return display_range
 
 
-## 目前为止的数据峰值（原始强度单位）——界面上显示「量程」用。
+## 把显示上限抬到 value（只在自动量程打开、且 value 确实更大时生效）。
+##
+## 后端每条 `rs_col` 都带着 `vmax`（该 z 处**整行**的峰值，不只是显示窗口内的），
+## 用它比前端自己按列再累积一份峰值更可信 —— 两套实现一旦漂移（例如中止后重新开始），
+## 画面颜色就会和数据对不上。
+func set_peak(value: float) -> void:
+	if not auto_range or not is_finite(value) or value <= display_range.y:
+		return
+	display_range.y = value
+	_apply_range()
+
+
+## 当前显示范围的峰值（原始强度单位）。
 func get_peak() -> float:
 	return display_range.y
 

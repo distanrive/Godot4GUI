@@ -149,6 +149,35 @@ static func _styleboxes(t: Theme) -> void:
 	t.set_stylebox("panel", "AcceptDialog", dialog)
 	t.set_stylebox("panel", "ConfirmationDialog", dialog)
 
+	# 内嵌窗口（对话框 / FileDialog）的标题栏：默认是深灰，跟浅色主题不搭。
+	# 换色时**必须保留默认的内容边距**（content_margin_top = 28 是标题栏高度、
+	# expand_margin = 32 是投影留白）：边距给小了标题文字会被裁掉——
+	# 这就是「覆盖 embedded_border 之后标题栏消失」的真正原因，不是不能覆盖。
+	var embed := StyleBoxFlat.new()
+	embed.bg_color = ThemePalette.SURFACE_ALT
+	embed.border_color = ThemePalette.BORDER
+	embed.set_border_width_all(1)
+	embed.set_corner_radius_all(ThemePalette.RADIUS_MD)
+	embed.expand_margin_left = 32.0
+	embed.expand_margin_top = 32.0
+	embed.expand_margin_right = 32.0
+	embed.expand_margin_bottom = 32.0
+	embed.content_margin_left = 10.0
+	embed.content_margin_top = 28.0
+	embed.content_margin_right = 10.0
+	embed.content_margin_bottom = 8.0
+	# 保留一点投影，否则对话框和浅色背景贴在一起分不出层次
+	embed.shadow_color = Color(0.0, 0.0, 0.0, 0.16)
+	embed.shadow_size = 10
+	t.set_stylebox("embedded_border", "Window", embed)
+	t.set_stylebox("embedded_unfocused_border", "Window", embed)
+	t.set_color("title_color", "Window", ThemePalette.TEXT)
+	t.set_color("title_outline_modulate", "Window", _TRANSPARENT)
+	t.set_font_size("title_font_size", "Window", ThemePalette.FONT_MD)
+	# 关闭按钮：引擎默认是「白色叉」，浅色标题栏上会看不见，必须换成深色图标
+	t.set_icon("close", "Window", _icon("close.svg"))
+	t.set_icon("close_pressed", "Window", _icon("close_pressed.svg"))
+
 	# 列表 / 树选中背景
 	var selected := _sb(ThemePalette.ACCENT_SOFT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0)
 	for typ in ["ItemList", "Tree"]:
@@ -235,6 +264,10 @@ static func _icons(t: Theme) -> void:
 	t.set_icon("arrow", "Tree", arrow_down)
 	t.set_icon("arrow_collapsed", "Tree", arrow_right)
 
+	# 树状表格的展开箭头（自绘控件不认 Tree 的图标，得在自己的类型名下再注册一次）
+	t.set_icon("arrow_expanded", "TreeTable", arrow_down)
+	t.set_icon("arrow_collapsed", "TreeTable", arrow_right)
+
 	# 弹出菜单：仅当前选项用圆点标记，其余不显示任何标记
 	t.set_icon("checked", "PopupMenu", dot)
 	t.set_icon("radio_checked", "PopupMenu", dot)
@@ -291,6 +324,16 @@ static func _custom_types(t: Theme) -> void:
 	t.set_color("grid_color", "DataTable", ThemePalette.BORDER)
 	t.set_color("header_text_color", "DataTable", ThemePalette.TEXT)
 	t.set_color("text_color", "DataTable", ThemePalette.TEXT)
+
+	# 树状表格（TreeTable）：比 DataTable 多「选中底色 / 悬停底色 / 层级引导线」
+	t.set_color("header_bg_color", "TreeTable", ThemePalette.SURFACE_ALT)
+	t.set_color("cell_bg_color", "TreeTable", ThemePalette.SURFACE)
+	t.set_color("grid_color", "TreeTable", ThemePalette.BORDER)
+	t.set_color("header_text_color", "TreeTable", ThemePalette.TEXT)
+	t.set_color("text_color", "TreeTable", ThemePalette.TEXT)
+	t.set_color("selected_bg_color", "TreeTable", ThemePalette.ACCENT_SOFT)
+	t.set_color("hover_bg_color", "TreeTable", ThemePalette.SURFACE_ALT)
+	t.set_color("guide_color", "TreeTable", ThemePalette.BORDER_STRONG)
 
 	# 环形进度条（CircularProgressBar）
 	t.set_color("track_color", "CircularProgressBar", ThemePalette.SURFACE_ALT)

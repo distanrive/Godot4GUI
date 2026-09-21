@@ -14,6 +14,11 @@
     pip install -r requirements.txt
     python backend/main.py                # 默认 127.0.0.1:8765
     python backend/main.py --port 9000    # 换端口（端口被占用时）
+    python backend/main.py --log-file x.log   # 同时把日志写进文件
+
+也可以由前端自动拉起（见 `scripts/autoload/backend_launcher.gd` 与 project.godot 的
+`[backend]` 段）。那种情况下本进程是**脱离进程**、stdout 没人接，所以前端会传
+`--log-file` —— 「后端起不来」时前端唯一能拿到的线索就是它。
 """
 
 from __future__ import annotations
@@ -21,8 +26,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import datetime
 import json
 import math
+import os
 import random
 import sys
 import time
@@ -35,6 +42,55 @@ from rayleigh_sommerfeld import Config as RSConfig, Simulation, load_params
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+SERVER_NAME = "godot4gui-backend"
+BACKEND_VERSION = "1.1"
+MAX_LOG_BYTES = 2 * 1024 * 1024     # 日志超过这个大小就轮转一次，避免长期运行无限膨胀
+
+_log_handle = None
+
+
+# ---------------------------------------------------------------- 日志
+
+def log(message: str = "") -> None:
+    """打印，并在 `--log-file` 生效时同时追加到文件。
+
+    前端用 `OS.create_process` 拉起后端时，后端是脱离进程：stdout 没有终端接收，
+    「后端起不来」时前端拿不到任何线索。所以这层 tee 不是锦上添花 ——
+    `BackendLauncher` 失败时读到的那段日志尾巴就来自它。
+    """
+    print(message, flush=True)
+    if _log_handle is not None:
+        try:
+            _log_handle.write(message + "\n")
+            _log_handle.flush()
+        except OSError:
+            pass        # 日志写不进去不该影响后端干活
+
+
+def open_log_file(path: str) -> None:
+    """打开日志文件（追加）。文件过大时先轮转，防止长期运行把磁盘写满。"""
+    global _log_handle
+    if not path:
+        return
+    try:
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if os.path.isfile(path) and os.path.getsize(path) > MAX_LOG_BYTES:
+            os.replace(path, path + ".old")
+        _log_handle = open(path, "a", encoding="utf-8", buffering=1)
+    except OSError as exc:
+        print(f"[backend] 无法写入日志文件 {path}：{exc}", file=sys.stderr)
+
+
+def close_log_file() -> None:
+    global _log_handle
+    if _log_handle is not None:
+        try:
+            _log_handle.close()
+        except OSError:
+            pass
+        _log_handle = None
 
 
 class Session:
@@ -90,7 +146,7 @@ class Session:
             "y1": float(sim.y_values[-1]),
             "params": cfg.as_dict(),
         })
-        print(f"[backend] 衍射模拟开始：N={cfg.samples} 列数={total} "
+        log(f"[backend] 衍射模拟开始：N={cfg.samples} 列数={total} "
               f"λ={cfg.lamda:g}m D={cfg.diameter:g}m L={cfg.width:g}m")
 
         cancel = asyncio.Event()
@@ -102,6 +158,7 @@ class Session:
         started = time.perf_counter()
         vmax = 0.0
         done = 0
+        failed = False
         try:
             for index in range(total):
                 if cancel.is_set():
@@ -124,16 +181,21 @@ class Session:
         except ConnectionClosed:
             pass   # 前端已断开，没人可通知了，安静收尾
         except Exception as exc:                      # noqa: BLE001 —— 报给前端而不是静默失败
+            failed = True
+            log(f"[backend] 衍射模拟出错：{type(exc).__name__}: {exc}")
             await self.send({"type": "rs_error", "message": f"{type(exc).__name__}: {exc}"})
         finally:
             elapsed = time.perf_counter() - started
-            print(f"[backend] 衍射模拟结束：{done}/{total} 列，用时 {elapsed:.1f}s")
+            log(f"[backend] 衍射模拟结束：{done}/{total} 列，用时 {elapsed:.1f}s")
             try:
                 await self.send({
                     "type": "rs_done",
                     "columns": done,
                     "elapsed": elapsed,
                     "cancelled": cancel.is_set(),
+                    # 出错时也要发 rs_done（前端要借此收尾），但必须带上 error，
+                    # 否则前端会把这个「结束」当成「算完了」而把错误信息覆盖掉。
+                    "error": failed,
                 })
             except (ConnectionClosed, RuntimeError, asyncio.CancelledError):
                 pass   # 前端已断开 / 正在收尾，收尾消息送不出去属正常
@@ -151,7 +213,11 @@ class Session:
     async def handle(self, msg: dict) -> None:
         kind = msg.get("type")
         if kind == "hello":
-            print("[backend] 收到 hello")
+            # 回一条 hello_ack：前端据此确认「这个端口上跑的就是我们的后端」，
+            # 而不是撞上了别的程序占着同一个端口（见 backend_launcher.gd 的 _verified）。
+            log("[backend] 收到 hello")
+            await self.send({"type": "hello_ack", "server": SERVER_NAME,
+                             "version": BACKEND_VERSION})
             return
         if kind != "command":
             return
@@ -160,10 +226,10 @@ class Session:
         args = msg.get("args") or {}
         if cmd == "start":
             self.streaming = True
-            print("[backend] 启动采集")
+            log("[backend] 启动采集")
         elif cmd in ("stop", "estop"):
             self.streaming = False
-            print("[backend] 停止采集")
+            log("[backend] 停止采集")
         elif cmd == "rs_start":
             await self.start_simulation(args)
         elif cmd == "rs_stop":
@@ -174,7 +240,7 @@ class Session:
 
 
 async def handler(websocket):
-    print(f"[backend] 客户端接入 {websocket.remote_address}")
+    log(f"[backend] 客户端接入 {websocket.remote_address}")
     session = Session(websocket)
     producer = asyncio.create_task(session.sample_loop())
     try:
@@ -182,12 +248,12 @@ async def handler(websocket):
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
-                print(f"[backend] 收到非 JSON 消息：{raw[:120]!r}")
+                log(f"[backend] 收到非 JSON 消息：{raw[:120]!r}")
                 continue
             if isinstance(msg, dict):
                 await session.handle(msg)
     except ConnectionClosed:
-        print("[backend] 客户端断开")
+        log("[backend] 客户端断开")
     finally:
         producer.cancel()
         await session.stop_simulation()
@@ -196,22 +262,22 @@ async def handler(websocket):
 async def main(host: str, port: int) -> None:
     try:
         async with websockets.serve(handler, host, port):
-            print(f"[backend] 监听 ws://{host}:{port}（Ctrl+C 停止）")
+            log(f"[backend] 监听 ws://{host}:{port}（Ctrl+C 停止）")
             await asyncio.Future()   # 一直运行，直到 Ctrl+C
     except OSError as exc:
         # 端口被占用（Windows 常见 WinError 10048）等启动失败
-        print(f"[backend] 启动失败：无法监听 ws://{host}:{port}（端口被占用）")
-        print(f"        原始错误：{exc}")
-        print()
-        print("  排查与解决：")
-        print(f"    1) 已有实例在跑 —— 找到并结束占用该端口的进程：")
-        print(f"         netstat -ano | findstr :{port}     # 看最后一列 PID")
-        print(f"         taskkill /F /PID <pid>            # 结束该进程")
-        print(f"    2) 端口被其它程序占用 —— 换一个端口：")
-        print(f"         python backend/main.py --port {port + 1}")
-        print(f"    3) 刚关闭又立刻重启 —— 稍等几秒，等系统释放 TIME_WAIT 状态")
+        log(f"[backend] 启动失败：无法监听 ws://{host}:{port}（端口被占用）")
+        log(f"        原始错误：{exc}")
+        log()
+        log("  排查与解决：")
+        log(f"    1) 已有实例在跑 —— 找到并结束占用该端口的进程：")
+        log(f"         netstat -ano | findstr :{port}     # 看最后一列 PID")
+        log(f"         taskkill /F /PID <pid>            # 结束该进程")
+        log(f"    2) 端口被其它程序占用 —— 换一个端口：")
+        log(f"         python backend/main.py --port {port + 1}")
+        log(f"    3) 刚关闭又立刻重启 —— 稍等几秒，等系统释放 TIME_WAIT 状态")
         sys.exit(1)
-    print("[backend] 已停止")
+    log("[backend] 已停止")
 
 
 if __name__ == "__main__":
@@ -219,8 +285,17 @@ if __name__ == "__main__":
     ap.add_argument("--host", default=HOST, help=f"监听地址（默认 {HOST}）")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT,
                     help=f"监听端口（默认 {DEFAULT_PORT}）")
+    ap.add_argument("--log-file", default="", metavar="PATH",
+                    help="把日志同时写进这个文件（前端自动拉起时会传，便于排查启动失败）")
     args = ap.parse_args()
+
+    open_log_file(args.log_file)
+    if args.log_file:
+        log(f"\n===== {datetime.datetime.now():%Y-%m-%d %H:%M:%S} "
+            f"backend v{BACKEND_VERSION} 启动（pid={os.getpid()}）=====")
     try:
         asyncio.run(main(args.host, args.port))
     except KeyboardInterrupt:
-        print("\n[backend] 收到 Ctrl+C，正在退出…")
+        log("\n[backend] 收到 Ctrl+C，正在退出…")
+    finally:
+        close_log_file()

@@ -76,6 +76,17 @@ func _build() -> void:
 		b.pressed.connect(_show_section.bind(s[1]))
 		nav.add_child(b)
 
+	# 界面缩放（AppShell + UiScaleOption）：模板的拉伸模式是 disabled，
+	# 所以「高 DPI 屏上字太小」要靠这里调，选完记到 user://config.cfg。
+	var nav_spacer := Control.new()
+	nav_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	nav.add_child(nav_spacer)
+	var scale_label := Label.new()
+	scale_label.text = "界面缩放"
+	scale_label.theme_type_variation = "Subtitle"
+	nav.add_child(scale_label)
+	nav.add_child(UiScaleOption.new())
+
 	# 右侧滚动内容
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -247,12 +258,20 @@ func _section_buttons() -> void:
 	row2.add_child(sb)
 
 	var gb := Button.new()
-	gb.text = "幽灵按钮"
+	gb.text = "幽灵按钮（无底色）"
 	gb.theme_type_variation = "GhostButton"
 	row2.add_child(gb)
 
 	_section_box.add_child(_card("语义按钮（类型变体）", row2))
-	_section_box.add_child(_caption("设 theme_type_variation 即可获得统一样式：AccentButton / DangerButton / SuccessButton / GhostButton。"))
+	_section_box.add_child(_caption(
+		"设 theme_type_variation 即可获得统一样式。五个变体各自的用途："
+		+ " AccentButton = 一屏一个的主操作（开始/保存）；"
+		+ " DangerButton = 有破坏性或安全相关的操作（急停/删除）；"
+		+ " SuccessButton = 确认执行；"
+		+ " GhostButton = **次要操作**（回读参数、打开日志目录这类）；"
+		+ " CapsuleButton = 标签式筛选/快捷选项，不是「执行」而是「选择」。"
+		+ "\n「幽灵」指的是**没有底色和边框、只有文字**，悬停时才浮出一层浅底 —— "
+		+ "所以它不跟主操作抢视觉焦点，适合放在卡片和工具栏里。它不是权限、也不是状态。"))
 
 	# 胶囊按钮：全圆角 + 描边（类型变体 CapsuleButton）
 	var row3 := HBoxContainer.new()
@@ -611,14 +630,18 @@ func _section_containers() -> void:
 
 func _section_tables() -> void:
 	_section_box.add_child(_header("表格与列表 Table / List"))
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 8)
 
+	# ---- ItemList（原生控件，固定高、内容多了自己出滚动条）----
 	var list := ItemList.new()
-	list.custom_minimum_size = Vector2(0, 120)
-	for i in range(8):
+	list.custom_minimum_size = Vector2(280, 172)
+	list.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	for i in range(6):
 		list.add_item("列表项 %d" % (i + 1))
+	_section_box.add_child(_card("ItemList（Godot 原生列表）", list))
+	_section_box.add_child(_caption(
+		"ItemList 是原生控件，样式走全局主题；高度给多少显示多少，超出的部分自己出滚动条。"))
 
+	# ---- DataTable（自绘，可拖拽调列宽）----
 	var table := DataTable.new()
 	table.set_columns(
 		PackedStringArray(["参数", "数值", "单位"]),
@@ -627,13 +650,104 @@ func _section_tables() -> void:
 	for i in range(4):
 		rows.append(["通道 %d" % (i + 1), "%.1f" % (i * 1.5 + 10.0), "V" if i % 2 == 0 else "mA"])
 	table.set_rows(rows)
-	table.custom_minimum_size = Vector2(390, 30 + 26 * rows.size())
+	# 只给宽度；高度由控件按行数自动上报，不要去设 custom_minimum_size.y
+	table.set_min_width(390.0)
 	table.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_section_box.add_child(_card("DataTable（可拖拽调列宽）", table))
+	_section_box.add_child(_caption(
+		"DataTable 为自绘数据表：拖动表头分隔线调列宽，最后一列自动填满剩余宽度；"
+		+ "Godot 的 Tree 做不到这一点。高度按行数自动上报，调用方只管宽度。"))
 
-	vb.add_child(list)
-	vb.add_child(table)
-	_section_box.add_child(_card("ItemList 与 DataTable（可拖拽调列宽）", vb))
-	_section_box.add_child(_caption("DataTable 为自绘数据表，拖动表头分隔线调列宽；Godot 的 Tree 不支持拖拽调列宽。"))
+	_add_tree_table_section()
+
+
+## 树状表格演示：三层「设备 → 通道 → 测量项」，另配展开/收起与选中读数的按钮。
+func _add_tree_table_section() -> void:
+	var tree := TreeTable.new()
+	tree.set_columns(
+		PackedStringArray(["设备 / 通道 / 测量项", "状态", "数值", "单位"]),
+		PackedFloat32Array([260.0, 90.0, 90.0, 60.0]))
+
+	# 三层数据：层级**不要**写进文本里（不要手写 └ / ├），
+	# 缩进与引导线由 TreeTable 自己画，文本里再写一遍就是重复的层级标记。
+	var specs := [
+		["温控台 A", "在线", [
+			["通道 1", "正常", [["热电偶", "25.4", "℃"], ["设定值", "25.0", "℃"]]],
+			["通道 2", "报警", [["热电偶", "41.8", "℃"], ["设定值", "25.0", "℃"]]],
+		]],
+		["电源 B", "在线", [
+			["输出 1", "正常", [["电压", "12.00", "V"], ["电流", "0.85", "A"]]],
+		]],
+		["泵组 C", "离线", []],
+	]
+	for spec in specs:
+		var dev := tree.create_item()
+		dev.set_cells(PackedStringArray([spec[0], spec[1], "—", ""])).set_expanded(true)
+		dev.set_metadata({"kind": "device", "name": spec[0]})
+		for chan_spec in spec[2]:
+			var chan := tree.create_item(dev)
+			chan.set_cells(PackedStringArray([chan_spec[0], chan_spec[1], "—", ""]))
+			chan.set_metadata({"kind": "channel", "name": chan_spec[0]})
+			# 展开到第三层，好把「多级引导线」和「最后一个子项收成 └」都演示出来
+			chan.set_expanded(not chan_spec[2].is_empty())
+			for point_spec in chan_spec[2]:
+				var point := tree.create_item(chan)
+				point.set_cells(PackedStringArray([point_spec[0], "",
+						point_spec[1], point_spec[2]]))
+				point.set_metadata({"kind": "point", "name": point_spec[0]})
+
+	var readout := Label.new()
+	readout.theme_type_variation = "PathLabel"
+	readout.text = "item_selected → （点一行看看）"
+	tree.item_selected.connect(func(item: TreeTableItem):
+		readout.text = "item_selected → " if item != null else "item_selected → (null)"
+		if item != null:
+			readout.text += "『%s』 %s" % [item.get_cells()[0], str(item.get_metadata())])
+	tree.item_activated.connect(func(item: TreeTableItem):
+		readout.text = "item_activated（双击）→ 『%s』" % item.get_cells()[0])
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 8)
+	var expand := Button.new()
+	expand.text = "全部展开"
+	expand.theme_type_variation = "CapsuleButton"
+	expand.pressed.connect(func(): tree.set_all_expanded(true))
+	var collapse := Button.new()
+	collapse.text = "全部收起"
+	collapse.theme_type_variation = "CapsuleButton"
+	collapse.pressed.connect(func(): tree.set_all_expanded(false))
+	var drop := Button.new()
+	drop.text = "删掉选中行"
+	drop.theme_type_variation = "GhostButton"
+	drop.pressed.connect(func():
+		var sel := tree.get_selected()
+		if sel != null:
+			readout.text = "已删除『%s』" % sel.get_cells()[0]
+			sel.remove())
+	buttons.add_child(expand)
+	buttons.add_child(collapse)
+	buttons.add_child(drop)
+
+	# 放在 ScrollContainer 里：TreeTable 会把自己的最小高度同步成「表头 + 可见行数 × 行高」，
+	# 所以行数超出这个框时由外层滚动，不需要控件内部再做滚动。
+	var scroll := ScrollContainer.new()
+	# 给够高度，让展开到第三层（12 行）时整棵树都看得见，不用滚
+	scroll.custom_minimum_size = Vector2(0, 360)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.add_child(tree)
+	tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	box.add_child(scroll)
+	box.add_child(buttons)
+	box.add_child(readout)
+	_section_box.add_child(_card("TreeTable（树状表格：层级 + 可拖拽调列宽）", box))
+	_section_box.add_child(_caption(
+		"TreeTable 解决 Godot 原生 Tree 的两个短板：列宽不能拖（get_column_width 只读）"
+		+ "、样式不走本项目主题。层级用 create_item(parent) 建，点箭头展开/收起，"
+		+ "双击一行发 item_activated。要滚动就把它放进 ScrollContainer —— 控件会自己算最小高度。"))
 
 
 func _section_chart() -> void:

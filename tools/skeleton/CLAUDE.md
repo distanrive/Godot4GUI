@@ -6,7 +6,11 @@
 > 你只需要写「页面 + 协议 + 业务计算」。控件用法看 `scenes/gallery.tscn`。
 
 ## 技术栈与版本
-- **Godot 4.7.x（标准版，GDScript，非 .NET）**；渲染器用 `gl_compatibility`（兼容 RDP/虚拟机/老旧 GPU）。
+- **Godot 4.7.x（标准版，GDScript，非 .NET）**；渲染器用 `forward_plus` + Windows 上的默认驱动 `vulkan`，
+  给 3D 图表留路。老机器/RDP 上启动即崩或黑屏时回退 `gl_compatibility`
+  （`--rendering-method gl_compatibility`，或项目设置 Rendering → Renderer → Rendering Method）。
+  注：**Godot 4 没有 D3D11 渲染驱动**（只有 vulkan / d3d12 / metal / opengl3 系）。
+  想要更老的 D3D 路径只能用 `opengl3_angle`（ANGLE 翻译到 D3D11），且必须配 `gl_compatibility`。
 - **Python 3.11+**，后端依赖见 `backend/requirements.txt`。
 - 通信：WebSocket，默认 `ws://127.0.0.1:8765`。
 - 本地 Godot 4.7 官方英文文档（MD）：`D:\python_sourse\Godot Engine 4.7 documentation in English MD`
@@ -15,7 +19,7 @@
 ## 目录结构
 ```
 {{PROJECT_NAME}}/
-├── project.godot                 # 工程配置 + ThemeManager/NetClient autoload + gl_compatibility
+├── project.godot                 # 工程配置 + autoload + [backend] 段（渲染器 forward_plus + vulkan）
 ├── scenes/
 │   ├── app.tscn                  # 主场景（挂 scripts/app.gd）—— 你的业务界面
 │   └── gallery.tscn              # 控件/布局总览（开发期参照，可删）
@@ -24,7 +28,9 @@
 │   ├── gallery.gd                # Gallery 逻辑
 │   ├── autoload/
 │   │   ├── net_client.gd         # WebSocket 单例（NetClient）
-│   │   └── theme_manager.gd      # 主题单例：启动时构建并应用全局主题
+│   │   ├── theme_manager.gd      # 主题单例：启动时构建并应用全局主题
+│   │   ├── app_shell.gd          # 窗口最小尺寸 / DPI 界面缩放 / user://config.cfg（AppShell）
+│   │   └── backend_launcher.gd   # 后端连不上就自动拉起后端进程（BackendLauncher）
 │   ├── theme/
 │   │   ├── theme_palette.gd      # 设计令牌（颜色/圆角/字号/间距）—— 样式唯一可调来源
 │   │   ├── theme_factory.gd      # 由令牌构建完整 Theme
@@ -37,13 +43,18 @@
 ├── backend/
 │   ├── main.py                   # WebSocket 服务骨架（命令分发 + 数据流）
 │   └── requirements.txt
-└── docs/                         # 你的设计/协议文档放这里
+└── docs/
+    ├── gdscript-only-guide.md    # 不用 Python 后端时的写法、线程纪律与性能红线
+    └── ...                       # 你的设计/协议文档放这里
 ```
 
 ## 运行
-1. 后端：`pip install -r backend/requirements.txt && python backend/main.py`
-   （端口被占用时脚本会打印排查指引；或换端口 `python backend/main.py --port 9000`。）
+1. 后端依赖装一次：`pip install -r backend/requirements.txt`
 2. 前端：用 Godot 4.7 打开本目录，按 **F5** 运行。点「启动采集」看到曲线滚动即链路通。
+
+   **不用自己开后端**：`BackendLauncher` 发现连不上就会按 `project.godot` 的 `[backend]` 段
+   把 `backend/main.py` 拉起来（`python` 那一行是生成时就填好的本机解释器路径）。
+   想手动开后端并让前端别插手：`python backend/main.py` + 启动参数 `--no-backend-autostart`。
 
 ## 现成控件（`scripts/ui/`，直接 `ClassName.new()`）
 | 控件 | 用途 |
@@ -51,11 +62,14 @@
 | `TrendChart` / `MultiTrendChart` | 实时折线图（单图 / 多子图共享 X 轴） |
 | `IntensityMap` | 二维标量场伪彩图（坐标轴 + 色标条 + 逐列流式追加 + 悬停读数） |
 | `DataTable` | 可拖拽调列宽的数据表（`Tree` 不支持拖拽） |
+| `TreeTable` | 树状表格：层级展开/收起 + 可拖拽调列宽 + 行选中（`TreeTableItem` 是行对象） |
+| `ColumnTable` | 上两者的公共基类（列宽拖拽机制）；换宽度用 `set_min_width()`，高度由内容自动上报（别去写 `custom_minimum_size.y`，会覆盖掉自动高度） |
 | `FileDropBox` | 文件拖放框：拖入 = 输入路径，按钮调系统文件资源管理器 |
 | `LongPressButton` | 长按按钮（急停/启动等防误触场景） |
 | `Switch` / `PartitionIndicator` / `CircularProgressBar` | 开关 / 分段指示灯 / 环形进度 |
 | `FlashLabel` | 闪烁报警标签 |
 | `LabeledLineEdit` / `TitledGroup` / `ExpandWidget` / `StackedContainer` | 输入框 / 卡片分组 / 折叠 / 分页 |
+| `UiScaleOption` | 界面缩放选择器（跟随系统 / 100%~200%），放进工具栏即可 |
 
 其余（按钮、复选、单选、下拉、滑块、进度条、弹窗、菜单、滚动区…）用 Godot 原生控件 + 全局主题即可。
 
@@ -83,7 +97,16 @@
 - 实时图表：`extends Control`，重写 `_draw()` 用 `draw_polyline`，新数据后 `queue_redraw()`。
 - 二维标量场用 `IntensityMap`：数据是 `FORMAT_RF` 纹理，颜色由着色器查色标，**不要**在 CPU 上逐像素上色。
 - 数字格式化用 `Fmt.num()`：**GDScript 的 `%` 不支持 `%e` / `%g`**（会运行时报 unsupported format character）。
-- 网络：**只通过 `NetClient` 单例**，连它的 `connected` / `disconnected` / `data_received` 信号；不要在业务脚本里 `new WebSocketPeer`。
+- 网络：**只通过 `NetClient` 单例**，连它的 `connected` / `disconnected` / `data_received` / `connecting` 信号；不要在业务脚本里 `new WebSocketPeer`。
+  注意 `disconnected` 只在**曾经连上过**之后断线时才发；「后端从头到尾没起来」要靠 `connecting` 感知。
+- **后端进程生命周期交给 `BackendLauncher`**：它读 `project.godot` 的 `[backend]` 段
+  （`python` / `script` / `autostart` / `kill_on_exit`），连不上就自动拉起，失败时把后端日志尾部摆给用户看。
+  不要在业务脚本里自己 `OS.create_process`，也**不要**改成「扫 PATH 找 python」——
+  工控机上多版本 Python 是常态，静默挑错解释器只会让后端悄无声息地起不来。
+  换机器时改 `[backend] python`，或写到 `user://config.cfg` 的 `[backend]` 段（不动仓库）。
+- **界面缩放/窗口尺寸交给 `AppShell`**（`content_scale_factor` + `Window.min_size` + `user://config.cfg` 记忆）；
+  要给用户留缩放档位就放一个 `UiScaleOption.new()`。业务脚本自己的配置也用
+  `AppShell.config`（同一个文件，分自己的段），改完调 `AppShell.save_config()`。
 - 主题：由 `theme_palette.gd`（令牌）+ `theme_factory.gd`（构建）生成，`ThemeManager` 启动时应用到根窗口。
   **改样式只编辑 `theme_palette.gd`**；不要 per-control 打补丁（`theme = ...`、`add_theme_font_size_override`、`add_theme_color_override`），
   语义样式用 `theme_type_variation`。
@@ -100,5 +123,24 @@
 - 控件「选中」有多个子状态：ItemList/Tree 要同时设 `selected`/`selected_focus`/`hovered_selected`/`hovered_selected_focus`（背景）和 `font_selected_color`/`font_hovered_selected_color`（文字），否则点击悬停时仍是白字白底。
 - 闪烁/报警用 `FlashLabel`：先把文字设成报警色，再对 `modulate.a` 做透明度闪烁；**不要用 `modulate` 改颜色**（会把深色文字越乘越暗）。
 - 工控安全按钮（急停/启动）用 `LongPressButton` 防误触。
-- `Window` 的 `embedded_border` 用 StyleBoxFlat 覆盖会让标题栏消失，不要覆盖它。
+- `Window` 的 `embedded_border`（内嵌对话框标题栏）已在本模板里换成了浅色，改它时要保留引擎默认边距（`content_margin_top = 28`、`expand_margin_* = 32`），并配套换 `close`/`close_pressed` 图标——引擎默认是白叉，浅底上看不见。
 - 后端每个命令都要回 `ack`，出错要发 `error` 消息——只 `print` 在控制台，界面上看不见。
+- **`OS.create_process()` 起的进程不会随 Godot 退出而结束**：要么在 `_exit_tree()` 里 `OS.kill(pid)`
+  （`BackendLauncher` 就是这么做的），要么明确接受它变成孤儿进程。`OS.kill()` 之前必须先
+  `OS.is_process_running(pid)` —— pid 可能失效并被系统回收复用，拿旧 pid 去 kill 会杀到不相干的进程。
+- **收尾顺序：先 `NetClient.begin_shutdown()`，再关后端进程**。反过来的话后端一死 TCP 就断，
+  `NetClient` 会把这次主动收尾读成「后端崩了」，弹告警还要重连。autoload 的 `_exit_tree` 顺序不保证。
+- **拉伸模式是 `disabled`**，界面缩放走 `AppShell` 的 `content_scale_factor`：
+  最大化时是「显示更多内容」而不是整体放大。别改回 `canvas_items`。
+  另外 `DisplayServer.screen_get_scale()` 在 Windows 上恒返回 1.0，
+  要缩放得回退到 `screen_get_dpi() / 96`。
+- **`Switch` 是自绘 Control，没有 `BaseButton` 那套 API**：要「改状态但不触发回调」用
+  `set_pressed_no_signal()`，用 `set_pressed()` 会 emit `toggled`，容易打环。
+- **`TreeTableItem` 是显式所有权对象**（`extends Object`）：行由 `TreeTable` 拥有，调用方不要自己
+  `free()`；删一行用 `item.remove()`，之后该引用就失效了。用 `RefCounted` 会让父子互相持有引用形成
+  **引用环**，而 GDScript 用引用计数（非追踪 GC），环上的对象永远不回收。
+- **GDScript 不允许对象在「自己的调用栈里」释放自己**（会报 `Attempted to free a locked object`）。
+  自删逻辑要交给外部持有者，必要时 `call_deferred("free")` 推迟到空闲时。
+- `IntensityMap.setup()` / `clear()` 会把 `auto_range` 一并复位（内部 `_reset_range()`）：
+  只清 `display_range` 而留着 `auto_range = false`，`vmax` 会落到 `1e-30` → **整幅图全黑**。
+  要冻结量程用 `auto_range = false`，别去动 `display_range`。

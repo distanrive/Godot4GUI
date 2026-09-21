@@ -22,6 +22,8 @@
 | 多子图折线图 | `MultiTrendChart` | 垂直堆叠、共享 X 轴、各自独立 Y 轴 |
 | 伪彩强度图 | `IntensityMap` | 热力图：坐标轴 + 色标条 + 悬停读数；逐列流式追加，可换配色/伽马/量程 |
 | 数据表 | `DataTable` | 可拖拽调列宽（带双向限位），`Tree` 不支持拖拽 |
+| 树状表格 | `TreeTable` | 层级展开/收起 + 可拖拽调列宽 + 行选中；`TreeTableItem` 是行对象 |
+| 表格基类 | `ColumnTable` | 列宽拖拽那套机制的公共基类（`DataTable`/`TreeTable` 都继承它） |
 | 文件拖放框 | `FileDropBox` | 圆角虚线外框；拖入文件 = 输入路径，中间按钮调系统文件资源管理器 |
 | 长按按钮 | `LongPressButton` | 防误触（急停 / 启动） |
 | 开关 | `Switch` | Godot 无原生开关，`_draw` 自绘 |
@@ -34,9 +36,15 @@
 | 堆叠分页 | `StackedContainer` | 多页切换 |
 
 - **WebSocket 前后端通信**：JSON 文本帧，命令 / 采样 / 进度 / 回执 / 逐列图像数据。
+- **后端自动拉起**：`BackendLauncher` 发现连不上后端就自己把 `backend/main.py` 启起来
+  （Python 环境与脚本路径**显式配置在 `project.godot` 的 `[backend]` 段**，不做 PATH 自动发现），
+  退出时收掉自己起的进程。也可以 `--no-backend-autostart` 关掉，仍按老办法手动开。
+- **窗口 / 缩放适配**：拉伸模式 `disabled`（最大化时**显示更多内容**，而不是把界面整体放大），
+  启动时按屏幕 DPI 自动定缩放、设最小窗口尺寸，档位可在界面里选并记忆到 `user://config.cfg`。
 - **色标（colormap）内置**：`rainbow`（与 matplotlib `cmap='rainbow'` **逐点完全一致**）/ `jet` / `gray`，
   定义在 `scripts/theme/colormaps.gd`，由 `themes/shaders/colormap.gdshader` 在 GPU 上查表上色。
-- 渲染器用 `gl_compatibility`，兼容 RDP / 虚拟机 / 老旧 GPU。
+- 渲染器用 `forward_plus` + 默认的 `vulkan` 驱动（Windows 上**不用** d3d12，那对新机器以外都太新），
+  为后续 3D 图表留路；老机器可一键回退到 `gl_compatibility`，见下面「老旧配置」。
 
 ## 技术栈与版本
 
@@ -46,27 +54,59 @@
 
 ## 快速开始
 
-### 1. 启动后端
+### 1. 装一次后端依赖
 
 ```bash
 pip install -r backend/requirements.txt
-python backend/main.py
-# 端口被占用时：脚本会打印排查指引；或换端口：
-#   python backend/main.py --port 9000
 ```
 
 ### 2. 运行前端
 
 用 **Godot 4.7** 打开本目录，按 **F5** 运行（默认主场景 = 衍射演示）。
-左侧填参数（或把参数文件拖进 `FileDropBox` 自动回读）→ 点「开始计算」→ 图像逐列刷新。
 
-> 只逛控件不看后端：把主场景切成 `scenes/gallery.tscn`（或按 F6 运行该场景），无需启动 Python。
+**不用自己开后端**：前端发现连不上就会自动把 `backend/main.py` 拉起来，标题栏会显示
+「正在连接后端…」→「已连接后端（本次自动拉起，pid=…）」。左侧填参数
+（或把参数文件拖进 `FileDropBox` 自动回读）→ 点「开始计算」→ 图像逐列刷新。
+
+> 自动拉起用的是**显式配置**的解释器，不是 PATH 上随便一个 Python —— 见
+> `project.godot` 的 `[backend]` 段（换机器时改这里，或在前端里配置）。
+> 想手动开后端、让前端别插手：`python backend/main.py` + 启动参数 `--no-backend-autostart`。
+
+> 只逛控件不看后端：把主场景切成 `scenes/gallery.tscn`（或按 F6 运行该场景），无需 Python。
 
 命令行自测（可选，参数放在 `--` 之后）：
 
 ```bash
-godot scenes/main.tscn -- --preset=fast --autostart   # 快速预设 + 连上后端就开算
+godot scenes/main.tscn -- --preset=fast --autostart        # 快速预设 + 连上后端就开算
+godot scenes/main.tscn -- --no-backend-autostart           # 不让前端拉起后端
+godot scenes/main.tscn -- --ui-scale=1.5                   # 强制 150% 界面缩放
 ```
+
+### 老旧配置 / 渲染器回退
+
+渲染器是 `forward_plus`，Windows 上跑**默认的 `vulkan`** 驱动 —— 实验室机器 GTX 900 系起就支持。
+（Godot 4.6 起新建工程在 Windows 上默认给 `d3d12`，本项目**刻意不用**：太新，
+老机器/虚拟机上的驱动支持不如 vulkan 稳。真要 d3d12 就在 `project.godot` 里显式加
+`rendering/rendering_device/driver.windows="d3d12"`。）
+
+> **Godot 4 没有 D3D11 渲染驱动**：RenderingDevice 侧只有 `metal`/`vulkan`/`d3d12`。
+> 唯一沾 D3D11 的是 `opengl3_angle`（ANGLE 把 GL ES 翻译到 D3D11），但它必须配 `gl_compatibility`。
+
+如果遇到**启动即崩、黑屏、报 Vulkan 相关错误**（虚拟机、RDP、老 Intel 核显上较常见），按顺序回退：
+
+```bash
+# 1) 临时验证（不改工程）
+godot --rendering-method gl_compatibility scenes/main.tscn
+
+# 2) 永久回退：项目设置 → Rendering → Renderer → Rendering Method 改成 gl_compatibility
+
+# 3) 老 Intel 核显还可以试试 ANGLE —— 这条才是走 D3D11 的路径（需配合 gl_compatibility）
+godot --rendering-method gl_compatibility --rendering-driver opengl3_angle scenes/main.tscn
+```
+
+`gl_compatibility` 下 3D 仍可用（只是只支持基础特性）。另外 Vulkan 不可用时，
+引擎会按 `rendering/rendering_device/fallback_to_opengl3`（默认开）自动降级，不会直接黑屏。
+伪彩图用的是 canvas_item 着色器，**两种渲染器下表现一致**。
 
 ### 衍射演示小抄
 
@@ -82,7 +122,7 @@ godot scenes/main.tscn -- --preset=fast --autostart   # 快速预设 + 连上后
 
 ```
 Godot4GUI/
-├── project.godot                 # 工程配置 + autoload + gl_compatibility
+├── project.godot                 # 工程配置 + autoload + [backend] 段（渲染器 forward_plus + vulkan）
 ├── scenes/
 │   ├── main.tscn                 # 应用 Demo（衍射模拟，默认主场景）
 │   └── gallery.tscn              # 控件总览
@@ -91,7 +131,9 @@ Godot4GUI/
 │   ├── gallery.gd                # Gallery 逻辑
 │   ├── autoload/
 │   │   ├── net_client.gd         # WebSocket 单例（NetClient）
-│   │   └── theme_manager.gd      # 主题单例（启动时应用全局主题）
+│   │   ├── theme_manager.gd      # 主题单例（启动时应用全局主题）
+│   │   ├── app_shell.gd          # 窗口尺寸 / DPI 缩放 / user://config.cfg 记忆（AppShell）
+│   │   └── backend_launcher.gd   # 连不上后端就自动拉起后端进程（BackendLauncher）
 │   ├── theme/
 │   │   ├── theme_palette.gd      # 设计令牌（颜色/圆角/字号/间距，唯一可调来源）
 │   │   ├── theme_factory.gd      # 由令牌构建 Theme
@@ -102,7 +144,7 @@ Godot4GUI/
 │   ├── icons/                    # 复选/箭头/滑块等 SVG 图标
 │   └── shaders/colormap.gdshader # 伪彩着色器（强度 → 色标）
 ├── backend/
-│   ├── main.py                   # WebSocket 服务（协议分发）
+│   ├── main.py                   # WebSocket 服务（协议分发 + --log-file）
 │   ├── rayleigh_sommerfeld.py    # 衍射计算（逐列流式）
 │   └── requirements.txt
 ├── tools/
@@ -110,6 +152,8 @@ Godot4GUI/
 │   └── skeleton/                 # 新项目的起始页面/后端骨架/文档模板
 └── docs/
     ├── new-project-guide.md       # 【起新项目看这篇】完整开发指引
+    ├── gdscript-only-guide.md     # 不用 Python 后端时的写法与性能红线
+    ├── todo.md                    # 当前状态、待办与未决问题（接手开发先看）
     ├── siliconui-godot-mapping.md # PyQt-SiliconUI → Godot 迁移对照表
     └── plotting-alternatives.md   # 替代 matplotlib 的调研与选型
 ```
@@ -131,10 +175,12 @@ python tools/new_project.py D:\work\MyLab --title "XX 实验台"
 - `{"type":"rs_col","i":k,"z":...,"vmax":...,"data":"<base64 float32>"}` — **第 k 个距离的强度剖面**（逐列刷新）
 - `{"type":"rs_done","columns":N,"elapsed":s,"cancelled":bool}` — 计算结束
 - `{"type":"rs_params","ok":true,"params":{...}}` — 参数文件回读结果
-- `{"type":"rs_error","message":"..."}` — 计算报错
+- `{"type":"rs_error","message":"..."}` — 计算报错（之后仍会来一条 `rs_done`，带 `error:true`）
 - `{"type":"sample","x":...,"y":...}` — 通用示例采样点（`TrendChart` 演示用）
 - `{"type":"progress","value":...}` — 进度（0..100）
 - `{"type":"ack","id":N,"cmd":...}` — 命令回执
+- `{"type":"hello_ack","server":"godot4gui-backend","version":"..."}` — 对 `hello` 的应答，
+  前端据此确认「这个端口上跑的确实是我们的后端」，而不是撞上了别的程序
 
 前端 → 后端：
 

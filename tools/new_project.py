@@ -41,6 +41,7 @@ COPY_DIRS = [
 COPY_FILES = [
     "project.godot",
     "backend/requirements.txt",
+    "docs/gdscript-only-guide.md",
 ]
 # gallery（开发期参照手册）：--no-gallery 时不拷
 GALLERY_FILES = [
@@ -85,21 +86,33 @@ def copy_file(src: Path, dst: Path) -> None:
 
 
 def patch_project_godot(target: Path, name: str, title: str) -> None:
-    """改工程名、窗口标题与主场景。"""
+    """改工程名、窗口标题、主场景，以及 [backend] 段里的 Python 解释器路径。"""
     path = target / "project.godot"
     text = path.read_text(encoding="utf-8")
 
-    def sub(pattern: str, repl: str) -> None:
+    def sub(pattern: str, repl: str, required: bool = True) -> None:
         nonlocal text
         new, n = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
-        if n == 0:
+        if n == 0 and required:
             die(f"project.godot 里没找到 {pattern}，模板可能改过结构，请手动改")
         text = new
 
     sub(r'^config/name=".*"$', f'config/name="{name}"')
     sub(r'^config/description=".*"$', f'config/description="{title}：Godot 前端 + Python 后端"')
     sub(r'^run/main_scene=".*"$', 'run/main_scene="res://scenes/app.tscn"')
+    # BackendLauncher 要靠这一行来拉起后端。默认填「跑这个脚手架的 Python」——
+    # 这比去扫 PATH 靠谱得多，至少它确实装了依赖（requirements 是新项目自己装的）。
+    # 生成后请确认这一行指向新项目要用的环境；换机器时也要改它。
+    sub(r'^python=".*"$', 'python="%s"' % _python_for_godot(), required=False)
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def _python_for_godot() -> str:
+    """当前解释器的路径，转成 Godot 项目设置里惯用的正斜杠写法。"""
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":       # 别把无窗口解释器写进去，后端要看日志
+        exe = exe.with_name("python.exe")
+    return exe.as_posix()
 
 
 def copy_claude_skills(target: Path) -> int:

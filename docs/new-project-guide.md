@@ -16,10 +16,16 @@ python tools/new_project.py D:\work\MyLab --title "XX 实验台"
 
 cd /d D:\work\MyLab
 pip install -r backend/requirements.txt
-python backend/main.py                      # 终端 A：后端
-# 用 Godot 4.7 打开 D:\work\MyLab，按 F5    # 终端 B：前端
+# 用 Godot 4.7 打开 D:\work\MyLab，按 F5
 # 点右上角「启动采集」→ 曲线开始滚动 = 整条链路已通
 ```
+
+**只开一个终端就行**：前端发现连不上后端，会按 `project.godot` 的 `[backend]` 段自己把它拉起来
+（标题栏会显示「正在连接后端…」→「已连接后端（本次自动拉起，pid=…）」）。
+想把后端开在另一个终端也可以：`python backend/main.py`，再给前端加 `--no-backend-autostart`。
+
+生成时 `[backend] python=` 已经填成**跑这个脚手架的那个解释器**（比扫 PATH 靠谱）；
+换机器时改那一行。
 
 然后照第 4 节改 `scripts/app.gd` 和 `backend/main.py` 即可。
 
@@ -32,9 +38,13 @@ python backend/main.py                      # 终端 A：后端
 | 层 | 内容 | 新项目怎么处理 |
 |---|---|---|
 | **样式层** | `scripts/theme/theme_palette.gd`（设计令牌）→ `theme_factory.gd`（构建 Theme）→ `ThemeManager` autoload 应用 | **原样继承**，只改 `theme_palette.gd` 里的值 |
-| **通信层** | `scripts/autoload/net_client.gd`（WebSocket 单例、自动重连、JSON 分发） | **原样继承**，只改协议内容 |
-| **控件层** | `scripts/ui/` 14 个 `class_name` 控件 + `themes/`（图标、伪彩着色器） | 直接用；缺什么按第 7 节加 |
+| **外壳层** | `app_shell.gd`（窗口最小尺寸 / DPI 缩放 / `user://config.cfg` 记忆）、`ui_scale_option.gd` | **原样继承**；界面里放一个 `UiScaleOption.new()` 就把缩放交给用户 |
+| **通信层** | `net_client.gd`（WebSocket 单例、自动重连、JSON 分发）+ `backend_launcher.gd`（连不上就自动拉起后端进程） | **原样继承**，只改协议内容与 `project.godot` 的 `[backend]` 段 |
+| **控件层** | `scripts/ui/` 全部 `class_name` 控件 + `themes/`（图标、伪彩着色器） | 直接用；缺什么按第 7 节加 |
 | **业务层** | `scenes/app.tscn` + `scripts/app.gd`（页面）、`backend/main.py`（服务） | **你自己写**（脚手架给的是可跑的骨架） |
+
+**不需要 Python 后端**时，外壳层/样式层/控件层照样 100% 继承，只把通信层与业务层的后端部分去掉；
+写法和取舍见 `docs/gdscript-only-guide.md`。
 
 数据流长这样，改代码前先记住这张图：
 
@@ -65,8 +75,9 @@ python tools/new_project.py <目标目录> [--name 工程名] [--title 界面标
 - `--force` 目标目录非空时也继续（覆盖同名文件）。
 
 **原样复制**：`scripts/autoload/`、`scripts/theme/`、`scripts/ui/`、`scripts/util/`、
-`themes/`（图标 + 着色器）、`project.godot`（改名后）、`backend/requirements.txt`、
-`scenes/gallery.tscn` + `scripts/gallery.gd`；`.claude/skills/`（可选，Claude Code 的开发规范）。
+`themes/`（图标 + 着色器）、`project.godot`（改名后，`[backend] python=` 会改写成本机跑脚手架的那个解释器）、
+`backend/requirements.txt`、`scenes/gallery.tscn` + `scripts/gallery.gd`、
+`docs/gdscript-only-guide.md`（不需要后端时看这篇）；`.claude/skills/`（可选，Claude Code 的开发规范）。
 
 **替换成本项目的骨架**：
 
@@ -100,15 +111,29 @@ python tools/new_project.py <目标目录> [--name 工程名] [--title 界面标
    - `config/name="你的工程名"`
    - `config/description="..."`
    - `run/main_scene="res://scenes/app.tscn"`
-   并确认 `[autoload]` 两行在（顺序不能颠倒）：
+   并确认 `[autoload]` 四行都在、顺序不要颠倒（`AppShell` 要在 `BackendLauncher` 之前，
+   因为后者读前者的配置）：
    ```ini
    [autoload]
    ThemeManager="*res://scripts/autoload/theme_manager.gd"
    NetClient="*res://scripts/autoload/net_client.gd"
+   AppShell="*res://scripts/autoload/app_shell.gd"
+   BackendLauncher="*res://scripts/autoload/backend_launcher.gd"
    ```
-   渲染器保持 `renderer/rendering_method="gl_compatibility"`（兼容 RDP/虚拟机）。
+   再补一段**后端启动配置**（`BackendLauncher` 靠它拉起后端，不做 PATH 发现）：
+   ```ini
+   [backend]
+   python="C:/path/to/python.exe"      # 必须显式写；换机器时改这里
+   script="res://backend/main.py"
+   autostart=true
+   kill_on_exit=true
+   ```
+   渲染器：不用写。Godot 默认就是 `forward_plus` + Windows 上的 `vulkan`（正是我们要的），
+   写了也会在编辑器保存时被当成默认值抹掉。
 3. **建一个主场景**：`scenes/app.tscn` = 一个 `Control`（锚点铺满）+ 挂 `scripts/app.gd`。
 4. **建后端**：`backend/{main.py, requirements.txt}`。
+   **别删 `--host` / `--port` / `--log-file` 三个参数** —— 自动拉起时会传它们，
+   少了任何一个，argparse 会以 `unrecognized arguments` 直接退出。
 5. **拷 `scenes/gallery.tscn` + `scripts/gallery.gd`**（强烈建议）：它是控件参照手册，
    也是新控件的调试台。
 
@@ -368,16 +393,36 @@ t.set_font_size("label_font_size", "MyGauge", ThemePalette.FONT_SM)
 
 ## 8. 上线/部署注意
 
-- **渲染器**：保持 `gl_compatibility`。工控机常年跑 RDP 或虚拟机，Vulkan/Forward+ 会起不来。
-- **后端**：`pythonw backend/main.py` 可无窗口运行；要开机自启就做个计划任务。
-  端口被占用时脚本会打印排查指引（`netstat -ano | findstr :8765` + `taskkill`）。
+- **渲染器**：`forward_plus` + Windows 上的默认驱动 `vulkan`，给 3D 图表留路，实验室机器 GTX 900 系起即可。
+  （Godot 4.6 起新建工程在 Windows 上会给 `d3d12`，本项目刻意不用 —— 对老机器太新；
+  要 d3d12 就显式写 `rendering/rendering_device/driver.windows="d3d12"`，不写即 vulkan。
+  **Godot 4 没有 D3D11 驱动**，想走更老的 D3D 路径只能用 `opengl3_angle` + `gl_compatibility`。）
+  若目标机器是 RDP / 虚拟机 / 老 Intel 核显且**启动即崩或黑屏**，回退 `gl_compatibility`：
+  命令行 `--rendering-method gl_compatibility`（临时验证），或项目设置 Rendering → Renderer 改（永久）。
+  Vulkan 不可用时引擎会按 `fallback_to_opengl3`（默认开）自动降级。
+- **后端不用手动开**：`BackendLauncher` 会按 `project.godot` 的 `[backend]` 段自动拉起。
+  换机器时改这一段里的 `python`（绝对路径）与 `script`；也可以在 `user://config.cfg` 的
+  `[backend]` 段覆盖（不动仓库）。**刻意不做 PATH 自动发现** —— 工控机多版本 Python 是常态，
+  静默挑错解释器只会让后端悄无声息地起不来。
+- **后端跑成后台服务**（不想让前端管进程时）：`pythonw backend/main.py` 可无窗口运行，
+  要开机自启就做个计划任务；前端加 `--no-backend-autostart`。端口被占用时脚本会打印排查指引
+  （`netstat -ano | findstr :8765` + `taskkill`）。
+- **后端日志**：`--log-file <路径>` 会把 print 同时写进文件（前端自动拉起时就是这么传的，
+  因为它读不到脱离进程的 stdout）。失败时 `BackendLauncher` 会把日志尾部摆到界面上。
+  要更正式就自己接 `logging`。
 - **打包前端**：Godot 导出 Windows 可执行文件（需要 Export Templates）。
-  导出后 `res://` 变成只读包，别把运行期要写的数据放进 `res://`，用 `user://`。
+  导出后 `res://` 变成只读包：别把运行期要写的数据放进 `res://`，用 `user://`；
+  后端脚本 `res://backend/main.py` 在导出包里**不存在**（`.py` 不进 pck），
+  要把 `backend/` 目录**随 exe 一起拷过去** —— `BackendLauncher` 会依次找
+  `res://backend/main.py`（开发期）和「exe 同级的 `backend/main.py`」（部署期）。
 - **后端不在同一台机器**：改 `NetClient.url`（`scripts/autoload/net_client.gd` 的 `@export`），
   并在后端 `--host 0.0.0.0` 监听。注意这是**明文 ws**，跨机务必只在内网用。
+  （`BackendLauncher` 的 host/port 是从 `NetClient.url` 解析的，不用两处改。）
 - **断线重连**：`NetClient` 已内建（`auto_reconnect`，默认 2s 一次）。业务侧只要按
   `connected`/`disconnected` 信号更新状态灯即可，不用自己写重连。
-- **日志**：后端 `print` 会进控制台；要留档就自己加 `logging` 写文件（模板没带，避免强加习惯）。
+- **窗口与高 DPI**：拉伸模式是 `disabled` + `AppShell` 按 DPI 设 `content_scale_factor`，
+  所以最大化时是「显示更多内容」而不是整体放大。要给用户留缩放档位就放一个
+  `UiScaleOption.new()`；它会记进 `user://config.cfg`。
 
 ---
 
@@ -394,7 +439,11 @@ t.set_font_size("label_font_size", "MyGauge", ThemePalette.FONT_SM)
 | 中文/科学计数法格式报错 | GDScript 的 `%` **不支持 `%e`/`%g`**，用 `Fmt.num()` / `Fmt.sci()` |
 | 文件对话框选不了文件 | `FileDialog.file_mode` 默认是 `FILE_MODE_SAVE_FILE`，要显式设 `FILE_MODE_OPEN_FILE` |
 | 报警文字越看越暗 | 别用 `modulate` 改颜色，用 `FlashLabel` 或 `font_color`（modulate 是相乘） |
-| 表格拖不动列宽 | Godot 的 `Tree` 不支持，用本项目 `DataTable` |
+| 表格拖不动列宽 | Godot 的 `Tree` 不支持，用本项目 `DataTable`；要层级就用 `TreeTable` |
+| 伪彩图整幅全黑 | 只清了显示范围没复位 `auto_range`（`vmax` 落到 `1e-30`）。用 `_reset_range()` 一次性复位两件事 |
+| 关窗时弹「与后端断开连接」 | 收尾顺序反了：先 `NetClient.begin_shutdown()` 再杀后端进程，否则后端一死被读成「崩了」 |
+| 退出后残留 python 进程 | `OS.create_process` 起的进程不随 Godot 退出；要么 `_exit_tree` 里 `OS.kill(pid)`，要么接受它 |
+| 高 DPI 屏上字太小 / 最大化后界面被放大 | 拉伸模式应为 `disabled`，缩放走 `AppShell` 的 `content_scale_factor`（`screen_get_scale()` 在 Windows 上恒为 1.0，要回退到 `screen_get_dpi()/96`） |
 | 画面卡顿/界面假死 | 后端在事件循环里写了阻塞调用，丢 `run_in_executor` |
 | 端口被占用 | `python backend/main.py --port 9001`，或 `taskkill` 掉旧进程 |
 
@@ -402,9 +451,13 @@ t.set_font_size("label_font_size", "MyGauge", ThemePalette.FONT_SM)
 
 ## 10. 什么时候**不**用这个模板
 
-- 要做 3D 可视化/仿真界面 → 用 Godot 但别用这套 2D 控件，主题系统仍可复用；
+- 要做 3D 可视化/仿真界面 → 用 Godot 但别用这套 2D 控件，主题系统仍可复用
+  （渲染器已是 `forward_plus`，3D 可直接上手）；
 - 要 Web/远程访问 → 这套是**本地 WebSocket + 桌面窗口**，不适合浏览器交付；
 - 纯离线数据分析 → 直接用 Python（matplotlib/pyqtgraph 都行），不必上前后端；
+- **不需要 Python 后端**（纯界面/IO/轻计算，想交付单个 exe）→ **模板照用，只是把后端去掉**：
+  删 `backend/`、`[backend]` 段和 `NetClient`/`BackendLauncher`，保留主题与控件库；
+  写法、线程纪律、性能红线和「以后想加后端怎么留缝」见 **`docs/gdscript-only-guide.md`**；
 - 团队已有 Qt 资产且不打算换 → 迁移成本主要在控件重写，先看 `docs/siliconui-godot-mapping.md`
   的对照表评估工作量（该文件在模板仓库中被 .gitignore 排除，属本地参考）。
 

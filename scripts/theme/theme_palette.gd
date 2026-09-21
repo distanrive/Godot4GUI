@@ -95,11 +95,13 @@ const PAD_PANEL := 12.0
 const PAD_POPUP := 6.0
 const PAD_CARD_V := 10.0        # 卡片内标题与内容的垂直间距（TitledGroup/RowCard）
 
-# ---------- 数据表尺寸（DataTable） ----------
+# ---------- 数据表尺寸（ColumnTable / DataTable / TreeTable） ----------
 const TABLE_HEADER_H := 30.0
 const TABLE_ROW_H := 26.0
 const TABLE_PAD := 8.0          # 单元格左右留白
 const TABLE_MIN_COL := 40.0     # 列最小宽度
+const TABLE_INDENT := 16.0      # 树表每层缩进（TreeTable）
+const TABLE_ARROW_W := 16.0     # 树表展开箭头占位宽度（TreeTable）
 
 # ---------- 主题常量（theme constants，均为 int） ----------
 const SEP_BOX := 8            # HBox/VBox 子项间距
@@ -111,3 +113,16 @@ const SEP_SEPARATOR := 4      # 分隔线留白
 const SIDEBAR_W := 320.0        # 左侧参数栏宽度
 const PANEL_MIN_H := 220.0      # 主显示区最小高度
 const TOOLBAR_MIN_H := 28.0     # 工具行最小高度
+
+# ---------- 窗口（AppShell autoload） ----------
+# 用户能把窗口拖到的最小尺寸。低于这个值布局会开始互相挤压（参数栏出现滚动条、
+# 伪彩图被压扁），所以交给 AppShell 在启动时设成窗口的 min_size。
+const WINDOW_MIN_W := 1024.0
+const WINDOW_MIN_H := 640.0
+
+# ---------- 界面缩放（AppShell / UiScaleOption） ----------
+# 可选缩放档位；0.0 这一档是「跟随系统 DPI」的哨兵值（见 app_shell.gd 的 detect_dpi_scale）。
+const UI_SCALE_FOLLOW_SYSTEM := 0.0
+const UI_SCALE_STEPS := [1.0, 1.25, 1.5, 1.75, 2.0]
+const UI_SCALE_MIN := 0.75
+const UI_SCALE_MAX := 3.0

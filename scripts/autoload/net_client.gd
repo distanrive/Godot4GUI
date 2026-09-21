@@ -6,9 +6,14 @@ extends Node
 ##   前端 -> 后端：{"type": "hello"} 或 {"type": "command", "id", "cmd", "args"}
 ##
 ## 业务脚本不要自己 new WebSocketPeer，只连接本单例的信号即可。
+##
+## 注意 `disconnected` 的语义：它只在**曾经连上过**之后断线时才发。
+## 「后端从头到尾没起来」这种情况不会触发它（`_was_connected` 一直是 false）——
+## 需要感知这种情况请用 `connecting`（BackendLauncher 就是靠它在宽限期后拉起后端）。
 
+signal connecting                      # 业务层表达了「我要连」的意图（connect_to() 时发一次）
 signal connected                       # 已连接
-signal disconnected                    # 已断开
+signal disconnected                    # 曾经的连接断开了
 signal data_received(payload: Variant) # 收到一条解析后的 JSON 消息
 
 @export var url: String = "ws://127.0.0.1:8765"
@@ -19,6 +24,7 @@ var _socket := WebSocketPeer.new()
 var _reconnect_timer := 0.0
 var _was_connected := false
 var _msg_id := 0
+var _shutting_down := false
 
 
 var _wants_connection := false
@@ -31,10 +37,37 @@ func _ready() -> void:
 ## 开始连接（并启用自动重连）。应用场景在 _ready 里调用一次即可。
 func connect_to() -> void:
 	_wants_connection = true
+	# 已经连着/正在连时再 connect_to_url() 只会报错，直接忽略（业务里重复调用是常见的）
+	var state := _socket.get_ready_state()
+	if state == WebSocketPeer.STATE_OPEN or state == WebSocketPeer.STATE_CONNECTING:
+		return
 	_connect()
+	connecting.emit()
+
+
+## 当前是否连着（业务层发命令前判断用）。
+func is_open() -> bool:
+	return _socket.get_ready_state() == WebSocketPeer.STATE_OPEN
+
+
+## 业务层是否表达过「我要连接」。BackendLauncher 据此决定要不要拉起后端 ——
+## gallery 这类不联网的场景从不调用 connect_to()，也就不会被拉起后端。
+func wants_connection() -> bool:
+	return _wants_connection
+
+
+## 进入「静默退出」：不再 poll、不再广播 connected/disconnected。
+##
+## 收尾时**必须先调它、再关后端进程**。否则顺序会变成：后端进程一死，TCP 断开，
+## 下一次 `poll()` 把这次**主动收尾**读成「后端崩了」—— 于是弹一句「与后端断开连接」
+## 的告警，还要去重连一次。用户每次正常关窗都看到这句，就会去追一个不存在的故障。
+func begin_shutdown() -> void:
+	_shutting_down = true
 
 
 func _process(delta: float) -> void:
+	if _shutting_down:
+		return
 	_socket.poll()
 	match _socket.get_ready_state():
 		WebSocketPeer.STATE_OPEN:
@@ -92,4 +125,8 @@ func send_command(cmd: String, args: Dictionary = {}) -> int:
 
 
 func _exit_tree() -> void:
+	# 先立旗子再 close()：否则这一帧的 poll() 会把「我自己关的」读成「后端断了」，
+	# 业务层弹一句「与后端断开连接」，BackendLauncher 还会据此再拉起一个后端进程 ——
+	# 而此刻程序正在退出，那个新进程就没人收了。
+	_shutting_down = true
 	_socket.close()

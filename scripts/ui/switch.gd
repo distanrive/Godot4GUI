@@ -21,6 +21,19 @@ func set_pressed(v: bool) -> void:
 	queue_redraw()
 
 
+## 只改状态、不发 `toggled`。名字与 `BaseButton.set_pressed_no_signal()` 对齐 ——
+## 业务代码要在「状态被外部改了、但不想触发自己的回调」时用它（否则会打环）。
+func set_pressed_no_signal(v: bool) -> void:
+	if button_pressed == v:
+		return
+	button_pressed = v
+	queue_redraw()
+
+
+func is_pressed() -> bool:
+	return button_pressed
+
+
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		set_pressed(not button_pressed)
