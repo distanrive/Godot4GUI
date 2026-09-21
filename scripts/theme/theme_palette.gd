@@ -97,11 +97,20 @@ const PAD_CARD_V := 10.0        # 卡片内标题与内容的垂直间距（Titl
 
 # ---------- 数据表尺寸（ColumnTable / DataTable / TreeTable） ----------
 const TABLE_HEADER_H := 30.0
-const TABLE_ROW_H := 26.0
+# 行高要能塞下 CellButton（实测紧凑变体约 26px 高）。原来的 26 是纯文字行高，
+# 加单元格按钮后改成 30 —— 普通按钮实测 32px 高，塞进 26 的行里会顶到分隔线。
+const TABLE_ROW_H := 30.0
 const TABLE_PAD := 8.0          # 单元格左右留白
 const TABLE_MIN_COL := 40.0     # 列最小宽度
 const TABLE_INDENT := 16.0      # 树表每层缩进（TreeTable）
 const TABLE_ARROW_W := 16.0     # 树表展开箭头占位宽度（TreeTable）
+const TABLE_ACTION_SEP := 6.0   # 单元格里多个按钮之间的间距（太小的话白底按钮会连成一片）
+
+# ---------- 单元格按钮（CellButton 变体） ----------
+# 专门给表格单元格用的紧凑内边距：内容一样，只是上下左右收窄，好塞进一行里。
+# 普通按钮的内边距是 PAD_BUTTON_H/V（10/6），实测高 32px；收到 8/3 后约 26px。
+const PAD_CELL_BUTTON_H := 8.0
+const PAD_CELL_BUTTON_V := 3.0
 
 # ---------- 主题常量（theme constants，均为 int） ----------
 const SEP_BOX := 8            # HBox/VBox 子项间距

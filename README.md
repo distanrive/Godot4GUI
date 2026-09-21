@@ -11,9 +11,13 @@
 ## 特性
 
 - **主题系统**：设计令牌 `scripts/theme/theme_palette.gd` → 主题工厂 `theme_factory.gd` → `ThemeManager` 启动时应用到根窗口。**改样式只编辑 `theme_palette.gd` 一个文件**，全局生效（含弹窗、菜单、tooltip）。
-- **语义化样式**：`theme_type_variation` 提供按钮 `AccentButton` / `DangerButton` / `SuccessButton` / `GhostButton` / `CapsuleButton`，
+- **语义化样式**：`theme_type_variation` 提供按钮 `AccentButton` / `DangerButton` / `SuccessButton` / `GhostButton` / `CapsuleButton`
+  及表格单元格用的紧凑版 `CellButton` / `CellAccentButton` / `CellSuccessButton` / `CellDangerButton`，
   标签 `PageTitle` / `SectionTitle` / `CardTitle` / `Subtitle` / `Caption` / `LogLabel` / `PathLabel` / `DropHint`，
   状态 `StatusIdle` / `StatusOk` / `StatusWarn` / `StatusError`。**不要 per-control 改字号/颜色**，否则「全局可调」就断了。
+- **表格行内按钮**：`set_row_actions()` / `set_item_actions()` 把真实 `Button` 放进单元格
+  （「开始 / 暂停 / 删除」这类按行操作），发 `cell_action_pressed(uid, index, action)` 信号；
+  收起的行按钮自动隐藏、删行自动回收。见 `CLAUDE.md` 的「GDScript 约定」。
 - **自绘控件库**（零图表 addon 依赖，全部 `_draw()` / 着色器自绘）：
 
 | 控件 | class_name | 说明 |
@@ -21,9 +25,9 @@
 | 实时折线图 | `TrendChart` | 环形缓冲 + `draw_polyline`，自动/手动 Y 轴 |
 | 多子图折线图 | `MultiTrendChart` | 垂直堆叠、共享 X 轴、各自独立 Y 轴 |
 | 伪彩强度图 | `IntensityMap` | 热力图：坐标轴 + 色标条 + 悬停读数；逐列流式追加，可换配色/伽马/量程 |
-| 数据表 | `DataTable` | 可拖拽调列宽（带双向限位），`Tree` 不支持拖拽 |
-| 树状表格 | `TreeTable` | 层级展开/收起 + 可拖拽调列宽 + 行选中；`TreeTableItem` 是行对象 |
-| 表格基类 | `ColumnTable` | 列宽拖拽那套机制的公共基类（`DataTable`/`TreeTable` 都继承它） |
+| 数据表 | `DataTable` | 可拖拽调列宽（带双向限位）+ 行内按钮，`Tree` 不支持拖拽 |
+| 树状表格 | `TreeTable` | 层级展开/收起 + 可拖拽调列宽 + 行选中 + 行内按钮；`TreeTableItem` 是行对象 |
+| 表格基类 | `ColumnTable` | 列宽拖拽与「单元格按钮」那套机制的公共基类（`DataTable`/`TreeTable` 都继承它） |
 | 文件拖放框 | `FileDropBox` | 圆角虚线外框；拖入文件 = 输入路径，中间按钮调系统文件资源管理器 |
 | 长按按钮 | `LongPressButton` | 防误触（急停 / 启动） |
 | 开关 | `Switch` | Godot 无原生开关，`_draw` 自绘 |

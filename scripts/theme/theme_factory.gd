@@ -374,22 +374,25 @@ static func _custom_types(t: Theme) -> void:
 # ---------- 类型变体（语义化样式） ----------
 
 static func _type_variations(t: Theme) -> void:
-	# 强调按钮（主操作）
-	_add_button_variation(t, "AccentButton",
-			ThemePalette.ACCENT, ThemePalette.ACCENT_HOVER, ThemePalette.ACCENT_PRESS,
-			ThemePalette.TEXT_ON_ACCENT)
-	# 危险按钮（急停等）
-	_add_button_variation(t, "DangerButton",
-			ThemePalette.DANGER, ThemePalette.DANGER_HOVER, ThemePalette.DANGER_PRESS,
-			ThemePalette.TEXT_ON_ACCENT)
-	# 成功按钮
-	_add_button_variation(t, "SuccessButton",
-			ThemePalette.SUCCESS, ThemePalette.SUCCESS_HOVER, ThemePalette.SUCCESS_PRESS,
-			ThemePalette.TEXT_ON_ACCENT)
+	# 语义按钮，以及它们的「单元格紧凑版」（`Cell` 前缀）。
+	# 两者只差内边距，所以用同一段代码生成 —— 普通按钮实测 32px 高，
+	# 塞进 30px 的表格行里会顶到分隔线，`Cell*` 那几个是 26px。
+	var semantic := [
+		["AccentButton", ThemePalette.ACCENT, ThemePalette.ACCENT_HOVER, ThemePalette.ACCENT_PRESS],
+		["DangerButton", ThemePalette.DANGER, ThemePalette.DANGER_HOVER, ThemePalette.DANGER_PRESS],
+		["SuccessButton", ThemePalette.SUCCESS, ThemePalette.SUCCESS_HOVER, ThemePalette.SUCCESS_PRESS],
+	]
+	for spec in semantic:
+		_add_button_variation(t, spec[0], spec[1], spec[2], spec[3], ThemePalette.TEXT_ON_ACCENT)
+		_add_button_variation(t, "Cell" + spec[0], spec[1], spec[2], spec[3],
+				ThemePalette.TEXT_ON_ACCENT,
+				ThemePalette.PAD_CELL_BUTTON_H, ThemePalette.PAD_CELL_BUTTON_V)
 	# 幽灵按钮（透明底 + 主色文字）
 	_add_ghost_variation(t)
 	# 胶囊按钮（全圆角、带描边）
 	_add_capsule_variation(t)
+	# 单元格按钮（表格行内用的中性紧凑按钮）
+	_add_cell_button_variation(t)
 
 	# 标签变体：字号/颜色只在这里定义，业务脚本不要 add_theme_font_size_override
 	# （否则「全局可调」就断了），需要新层级时在这里加一个变体即可。
@@ -464,7 +467,8 @@ static func _apply_button_styles(t: Theme, typ: String,
 
 
 static func _add_button_variation(t: Theme, type_name: String,
-		bg: Color, bg_hover: Color, bg_pressed: Color, text: Color) -> void:
+		bg: Color, bg_hover: Color, bg_pressed: Color, text: Color,
+		pad_h := ThemePalette.PAD_BUTTON_H, pad_v := ThemePalette.PAD_BUTTON_V) -> void:
 	t.set_type_variation(type_name, "Button")
 	t.set_color("font_color", type_name, text)
 	t.set_color("font_hover_color", type_name, text)
@@ -473,14 +477,10 @@ static func _add_button_variation(t: Theme, type_name: String,
 	t.set_color("font_hover_pressed_color", type_name, text)
 	t.set_color("font_disabled_color", type_name, Color(text, 0.6))
 
-	var normal := _sb(bg, _TRANSPARENT, ThemePalette.RADIUS_SM, 0,
-			ThemePalette.PAD_BUTTON_H, ThemePalette.PAD_BUTTON_V)
-	var hover := _sb(bg_hover, _TRANSPARENT, ThemePalette.RADIUS_SM, 0,
-			ThemePalette.PAD_BUTTON_H, ThemePalette.PAD_BUTTON_V)
-	var pressed := _sb(bg_pressed, _TRANSPARENT, ThemePalette.RADIUS_SM, 0,
-			ThemePalette.PAD_BUTTON_H, ThemePalette.PAD_BUTTON_V)
-	var disabled := _sb(Color(bg, 0.4), _TRANSPARENT, ThemePalette.RADIUS_SM, 0,
-			ThemePalette.PAD_BUTTON_H, ThemePalette.PAD_BUTTON_V)
+	var normal := _sb(bg, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, pad_h, pad_v)
+	var hover := _sb(bg_hover, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, pad_h, pad_v)
+	var pressed := _sb(bg_pressed, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, pad_h, pad_v)
+	var disabled := _sb(Color(bg, 0.4), _TRANSPARENT, ThemePalette.RADIUS_SM, 0, pad_h, pad_v)
 	_apply_button_styles(t, type_name, normal, hover, pressed, disabled,
 			_outline(bg, ThemePalette.RADIUS_SM))
 	t.set_stylebox("hover_pressed", type_name, pressed)
@@ -509,6 +509,27 @@ static func _add_capsule_variation(t: Theme) -> void:
 	t.set_stylebox("hover_pressed", "CapsuleButton",
 			_sb(ThemePalette.ACCENT_SOFT_HOVER, ThemePalette.ACCENT, r, 1,
 				ThemePalette.PAD_BUTTON_H, ThemePalette.PAD_BUTTON_V))
+
+
+## 单元格按钮（`CellButton`）：给 `DataTable` / `TreeTable` 的行内按钮用。
+##
+## 它是 `Button` 的变体，所以**颜色全部继承普通按钮**（深浅、悬停、按下、禁用都一样），
+## 这里只把内边距收窄 —— 普通按钮实测 32px 高，塞进表格行里会顶到分隔线。
+## 需要语义色（红的删除、绿的开始）时**不要**用它，直接用 `DangerButton`/`SuccessButton`
+## 那些变体（它们略高一点，行高 30 也放得下）。
+static func _add_cell_button_variation(t: Theme) -> void:
+	t.set_type_variation("CellButton", "Button")
+	var ph := ThemePalette.PAD_CELL_BUTTON_H
+	var pv := ThemePalette.PAD_CELL_BUTTON_V
+	var r := ThemePalette.RADIUS_SM
+	_apply_button_styles(t, "CellButton",
+			_sb(ThemePalette.SURFACE, ThemePalette.BORDER, r, 1, ph, pv),
+			_sb(ThemePalette.SURFACE_ALT, ThemePalette.BORDER_STRONG, r, 1, ph, pv),
+			_sb(ThemePalette.ACCENT_SOFT, ThemePalette.ACCENT, r, 1, ph, pv),
+			_sb(ThemePalette.SURFACE, ThemePalette.BORDER, r, 1, ph, pv),
+			_outline(ThemePalette.ACCENT, r))
+	t.set_stylebox("hover_pressed", "CellButton",
+			_sb(ThemePalette.ACCENT_SOFT_HOVER, ThemePalette.ACCENT, r, 1, ph, pv))
 
 
 static func _add_ghost_variation(t: Theme) -> void:

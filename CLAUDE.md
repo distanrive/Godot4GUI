@@ -121,10 +121,21 @@ Godot4GUI/
 - UI 优先用 GDScript 代码构建（类 PyQt），复杂静态布局才手写 `.tscn`。
 - 实时图表：`extends Control`，重写 `_draw()` 用 `draw_polyline`，新数据后 `queue_redraw()`；多子图用 `MultiTrendChart`。
 - 二维标量场（热力图/伪彩图）用 `IntensityMap`：数据是 `FORMAT_RF` 纹理，颜色由 `themes/shaders/colormap.gdshader` 查色标，**不要**在 CPU 上逐像素上色。
-- 二维表格：平表用 `DataTable`，**层级/可展开的用 `TreeTable`**（Godot 原生 `Tree` 不支持拖拽调列宽，样式也不走本项目主题）。两者都继承 `ColumnTable`（列宽拖拽机制在那里）。
+- 二维表格：平表用 `DataTable`，**层级/可展开的用 `TreeTable`**（Godot 原生 `Tree` 不支持拖拽调列宽，样式也不走本项目主题）。两者都继承 `ColumnTable`（列宽拖拽 + 行内按钮机制在那里）。
   改宽度用 `set_min_width()`（或设 `custom_minimum_size.x`）；**高度由内容自动上报，不要去写 `custom_minimum_size.y`** ——
   那是「至少这么高」，写 0 会把自动高度覆盖掉，控件随即在自己的矩形之外画表格（表现为表格被裁、行溢到卡片外面，踩过）。
   层级关系由 `TreeTable` 自己画（缩进 + 引导线 + 展开箭头），**单元格文本里不要手写 `└`/`├`**，否则和引导线重复。
+- **表格行内按钮**（「开始 / 暂停 / 删除」这类按行操作）用 `set_row_actions(uid, 列号, 规格数组)`（树表是 `set_item_actions(item, 列号, 规格数组)`）。
+  规格每项 `{"text", "action", "variation", "tooltip", "disabled"}`；按钮是**真实 `Button` 节点**，
+  主题变体/禁用态/tooltip 都照常生效，点是发 `cell_action_pressed(uid, index, action)` 信号。
+  几个必须知道的点：
+  - **用 `Cell*` 变体**（`CellButton` / `CellSuccessButton` / `CellDangerButton` / `CellAccentButton`）：普通的 32px 高，塞进 30px 的行里会顶到分隔线，`Cell*` 是 26px。
+  - 按钮所在列**要留够宽度**（三个按钮约 140px 起）；放最后一列最省事（自动填满剩余宽度），别的列拖宽了会把它挤到溢出。
+  - 行用**整数 uid** 标识（树表是 `item.uid`），所以「行被删掉」不会让按钮引用悬空；`TreeTable.get_item_by_uid(uid)` 换回行对象。
+  - **换了行数据要重新配一次按钮**（按钮只认 uid，不会跟着数据走）；`DataTable` 的行号就是 uid，`set_rows()` 后行号含义变了。
+  - 收起的行按钮自动隐藏、展开后回来；行 `remove()` / `clear_items()` 会把按钮一起回收。
+  - 点按钮**不会**顺带选中该行（按钮自己消费了事件）；想要「点按钮也选中行」就在信号处理里自己调 `select()`。
+  - 按钮是真的节点：几百行 × 每行几个按钮开销可观，行数很多时建议只给当前页/可见行配。
 - 数字格式化用 `Fmt.num()` / `Fmt.sci()`：**GDScript 的 `%` 不支持 `%e` / `%g`**（会运行时报 unsupported format character）。
 - 网络：**只通过 `NetClient` 单例**，业务脚本连接它的 `connected` / `disconnected` / `data_received` / `connecting` 信号；不要在业务脚本里自己 `new WebSocketPeer`。
   注意 `disconnected` 只在**曾经连上过**之后断线时才发；「后端从头到尾没起来」要靠 `connecting` 感知（`BackendLauncher` 就是这么做的）。
@@ -136,7 +147,8 @@ Godot4GUI/
 - 业务脚本要存自己的配置，用 `AppShell.config`（同一个 `user://config.cfg`，分自己的段），改完调 `AppShell.save_config()`。
 - 后端消息是 JSON 字典，用 `type` 字段分发。
 - 主题：由 `scripts/theme/theme_palette.gd`（设计令牌）+ `theme_factory.gd`（构建）生成，`ThemeManager` autoload 启动时应用到根窗口，作用于所有控件与弹窗。**改样式只编辑 `theme_palette.gd`**；不要在单个控件上 `theme = ...` 打补丁，也不要用 `add_theme_font_size_override` / `add_theme_color_override` 改常规样式，语义样式用 `theme_type_variation`。
-- 可用的类型变体：按钮 `AccentButton`/`DangerButton`/`SuccessButton`/`GhostButton`/`CapsuleButton`；标签 `PageTitle`/`SectionTitle`/`CardTitle`/`Subtitle`/`Caption`/`LogLabel`/`PathLabel`/`DropHint`/`ValueText`；状态 `StatusIdle`/`StatusOk`/`StatusWarn`/`StatusError`。缺层级时在 `theme_factory.gd` 的 `_add_label_variation()` 里加一个，不要在业务脚本里就地打补丁。
+- 可用的类型变体：按钮 `AccentButton`/`DangerButton`/`SuccessButton`/`GhostButton`/`CapsuleButton`，
+  以及它们给表格单元格用的紧凑版 `CellButton`/`CellAccentButton`/`CellSuccessButton`/`CellDangerButton`；标签 `PageTitle`/`SectionTitle`/`CardTitle`/`Subtitle`/`Caption`/`LogLabel`/`PathLabel`/`DropHint`/`ValueText`；状态 `StatusIdle`/`StatusOk`/`StatusWarn`/`StatusError`。缺层级时在 `theme_factory.gd` 的 `_add_label_variation()` 里加一个，不要在业务脚本里就地打补丁。
 - **按钮变体怎么选**（语义是按「视觉权重」分的，不是按颜色好看）：
 
   | 变体 | 长什么样 | 什么场合用 |
@@ -146,6 +158,7 @@ Godot4GUI/
   | `SuccessButton` | 绿色实底 | 确认执行（下发参数/启动） |
   | `GhostButton` | **无底色无边框、只有文字**，悬停才浮出浅底 | 卡片/工具栏里的**次要操作**（回读参数、打开日志目录）。名字里的「幽灵」说的是它没有底板，不是权限或状态 |
   | `CapsuleButton` | 全圆角 + 描边 | 标签式**选择**（筛选/快捷选项），语义上不是「执行」 |
+  | `Cell*Button` | 同上各自的样子，但内边距收紧（44×26 而非 48×32） | **只在表格单元格里用**（行内按钮）。四个紧凑变体由 `_add_button_variation()` 连同普通版一起生成，改内边距只需动 `theme_palette.gd` 的 `PAD_CELL_BUTTON_*` |
 
 - 色标（colormap）只改 `scripts/theme/colormaps.gd`；默认 `rainbow` 与 matplotlib 的 `cmap='rainbow'` 逐点完全一致（`R=clamp(|2t-0.5|)`, `G=sin(πt)`, `B=cos(πt/2)`），别改这三行除非要换观感。
 - 完全没有 Python 后端的项目怎么写（纯 GDScript、线程纪律、性能红线、留「缝」以便日后升级）：见 **`docs/gdscript-only-guide.md`**。

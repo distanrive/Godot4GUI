@@ -38,6 +38,24 @@ func _theme_type() -> StringName:
 	return &"DataTable"
 
 
+## 平表的行用**下标**当 uid，所以 `set_row_actions(行号, 列号, 按钮数组)` 直接用即可。
+## 注意：`set_rows()` 换了数据之后行号的含义就变了，按钮要重新配一次。
+func _layout_rows() -> Array:
+	var out: Array = []
+	var top := ThemePalette.TABLE_HEADER_H
+	for i in _rows.size():
+		out.append({"uid": i, "top": top, "height": ThemePalette.TABLE_ROW_H})
+		top += ThemePalette.TABLE_ROW_H
+	return out
+
+
+func _all_row_uids() -> Array:
+	var out: Array = []
+	for i in _rows.size():
+		out.append(i)
+	return out
+
+
 func _draw() -> void:
 	if _titles.is_empty():
 		return

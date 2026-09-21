@@ -9,7 +9,8 @@ extends Control
 ## 子类要做三件事：
 ##   1. 覆写 `_theme_type()` 返回自己的主题类型名（`&"DataTable"` / `&"TreeTable"`）；
 ##   2. 覆写 `_draw()`，用 `_col_w()` / `_sep_x()` / `_theme_color()` 画内容；
-##   3. 覆写 `get_required_height()` 报告内容需要的高度（基类默认只有表头高）。
+##   3. 覆写 `get_required_height()` 报告内容需要的高度（基类默认只有表头高），
+##      并覆写 `_layout_rows()` / `_all_row_uids()` —— 单元格按钮靠它们定位（见下）。
 ##
 ## **高度由内容决定，不需要调用方手算**：「表头 + 行数 × 行高」交给
 ## `_get_minimum_size()` 报给容器，容器会自己腾地方。所以调用方只要管宽度
@@ -17,9 +18,31 @@ extends Control
 ## **不要去写 `custom_minimum_size.y`** —— 那是「至少这么高」，写 0 会覆盖掉自动高度，
 ## 控件就会在自己的矩形之外画内容（表现出来就是表格被裁掉、行溢到卡片外面）。
 ##
+## ## 单元格按钮（行内操作）
+##
+## `set_row_actions()` 能把**真实的 `Button` 节点**放进某一行的某一列（一行可放多个，
+## 比如「开始 / 暂停 / 删除」）。按钮是这个表格的子节点，所以会跟着表格一起滚、
+## 一起释放；主题变体也照常生效（用 `CellButton` / `CellSuccessButton` /
+## `CellDangerButton` 这些紧凑变体，普通按钮 32px 高、塞进 30px 的行里会顶到分隔线）。
+##
+## 行用 **整数 uid** 标识（不是对象引用），这样「行被删掉」和「按钮节点还在」这两件事
+## 不会互相悬空：uid 只用于查表，某行不存在了就把它的按钮回收掉。
+##
+## 注意几点：
+##   * 按钮所在的列**要留够宽度**（三个按钮约 140px 起）。放在最后一列最省事
+##     （最后一列会自动填满剩余宽度）；拖动别的列把它挤窄了，按钮会溢出到相邻列。
+##   * 点按钮**不会**顺带选中该行（按钮自己消费掉了事件）。想要「点按钮也选中行」，
+##     在 `cell_action_pressed` 的处理里自己调 `select()`。
+##   * 按钮是真的节点：几百行 × 每行几个按钮会有可观的开销。行数很多时建议只给
+##     当前页/可见行配按钮。
+##
 ## 列宽规则：拖动表头相邻列之间的分隔线调列宽（最小 `TABLE_MIN_COL`）；
 ## **最后一列自动填满剩余宽度**，不参与拖拽。颜色从 `_theme_type()` 的类型读取
 ## （回退到 ThemePalette 令牌），因此随全局主题统一调整。
+
+## 单元格按钮被点击：`uid` 是行标识（见 `set_row_actions`），`index` 是该行第几个按钮，
+## `action` 是按钮的 `action` 字段（没写就是按钮文字）。
+signal cell_action_pressed(uid: int, index: int, action: String)
 
 const _HIT := 6.0        # 分隔线命中范围（px）
 
@@ -30,10 +53,13 @@ var _drag_col := -1       # 正在拖拽的分隔线左侧列索引
 var _drag_start_x := 0.0
 var _drag_start_w := 0.0
 
+## uid -> {"col": int, "box": HBoxContainer}
+var _action_cells := {}
+
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	resized.connect(queue_redraw)
+	resized.connect(_on_resized)
 
 
 ## 设置列标题与初始列宽（宽度个数应与标题个数一致；最后一列宽度会被忽略、自动填满）。
@@ -102,10 +128,151 @@ func _get_minimum_size() -> Vector2:
 	return Vector2(0.0, get_required_height())
 
 
-## 列数 / 列宽 / 行数变化后的统一入口：让容器重新问一次最小尺寸。
+## 列数 / 列宽 / 行数变化后的统一入口：让容器重新问一次最小尺寸，并把单元格按钮重新摆好。
 ## 子类可覆写做更多事（记得调 super）。
 func _on_columns_changed() -> void:
 	update_minimum_size()
+	_relayout_actions()
+
+
+func _on_resized() -> void:
+	queue_redraw()
+	_relayout_actions()          # 列宽跟着窗口变，按钮的 x 要跟着走
+
+
+# ---------------------------------------------------------------- 单元格按钮
+
+## 给 `uid` 这一行的第 `col` 列放按钮。`specs` 每项是一个字典：
+##   `{"text": "开始",               # 必填，按钮文字
+##     "action": "start",           # 可选，随信号回传的标识；默认取 text
+##     "variation": "CellButton",   # 可选，主题变体；默认 CellButton（紧凑中性）
+##     "tooltip": "启动这一路",      # 可选
+##     "disabled": false}`          # 可选
+## 传空数组 = 清掉这一行已有的按钮。
+##
+## **行数据换了之后要重新调一次**（按钮不会自动跟着行数据走，它们只认 uid）。
+func set_row_actions(uid: int, col: int, specs: Array) -> void:
+	_remove_action_cell(uid)
+	if specs.is_empty():
+		return
+
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", int(ThemePalette.TABLE_ACTION_SEP))
+	# 按钮之间的空隙让点击落回表格本身（否则整行都点不动、选不中）
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(box)
+
+	var index := 0
+	for spec in specs:
+		if typeof(spec) != TYPE_DICTIONARY:
+			continue
+		var button := Button.new()
+		button.text = str(spec.get("text", ""))
+		var variation := str(spec.get("variation", "CellButton"))
+		if not variation.is_empty():
+			button.theme_type_variation = variation
+		button.tooltip_text = str(spec.get("tooltip", ""))
+		button.disabled = bool(spec.get("disabled", false))
+		var action := str(spec.get("action", button.text))
+		button.pressed.connect(_on_action_pressed.bind(uid, index, action))
+		box.add_child(button)
+		index += 1
+
+	_action_cells[uid] = {"col": col, "box": box}
+	_relayout_actions()
+
+
+## 取回某个按钮，便于事后改文字/禁用（例如「运行中」时把「开始」置灰）。
+func get_action_button(uid: int, index: int) -> Button:
+	if not _action_cells.has(uid):
+		return null
+	var box: Node = _action_cells[uid]["box"]
+	if not is_instance_valid(box) or index < 0 or index >= box.get_child_count():
+		return null
+	return box.get_child(index) as Button
+
+
+## 清掉某一行的按钮。
+func clear_row_actions(uid: int) -> void:
+	_remove_action_cell(uid)
+
+
+## 清掉所有行的按钮（换整张表的数据时用）。
+func clear_all_actions() -> void:
+	for uid in _action_cells.keys():
+		_remove_action_cell(uid)
+
+
+## 子类覆写：当前**可见**的行，每项 `{"uid": int, "top": float, "height": float}`
+## （`top` 含表头偏移，用控件自身坐标）。基类据此摆放按钮。
+func _layout_rows() -> Array:
+	return []
+
+
+## 子类覆写：当前**存在**的所有行 uid（**含被折叠/隐藏的**）。
+## 基类靠它区分「这一行只是暂时收起来了（按钮藏起来留着）」和
+## 「这一行已经没了（按钮连同节点一起回收）」。
+func _all_row_uids() -> Array:
+	return []
+
+
+func _on_action_pressed(uid: int, index: int, action: String) -> void:
+	cell_action_pressed.emit(uid, index, action)
+
+
+## 把按钮摆到对应单元格里；顺带做显隐与回收。
+func _relayout_actions() -> void:
+	if _action_cells.is_empty():
+		return
+
+	var valid := {}
+	for uid in _all_row_uids():
+		valid[uid] = true
+
+	var seen := {}
+	for row in _layout_rows():
+		var uid: int = row["uid"]
+		seen[uid] = true
+		if _action_cells.has(uid):
+			_place_action_cell(uid, float(row["top"]), float(row["height"]))
+
+	for uid in _action_cells.keys():
+		if seen.has(uid):
+			continue
+		if valid.has(uid):
+			# 行还在、只是被折叠/隐藏了：留着节点，先藏起来
+			var hidden_box: Node = _action_cells[uid]["box"]
+			if is_instance_valid(hidden_box):
+				(hidden_box as Control).visible = false
+		else:
+			# 行已经没了：回收
+			_remove_action_cell(uid)
+
+
+func _place_action_cell(uid: int, top: float, height: float) -> void:
+	var cell: Dictionary = _action_cells[uid]
+	var box: Control = cell["box"]
+	if not is_instance_valid(box):
+		return
+	# 先取到最小尺寸，才知道要往上挪多少才能垂直居中
+	box.reset_size()
+	var col := int(cell["col"])
+	var left := 0.0 if col <= 0 else _sep_x(col - 1)
+	box.position = Vector2(left + ThemePalette.TABLE_PAD,
+			top + (height - box.size.y) * 0.5)
+	box.visible = true
+
+
+func _remove_action_cell(uid: int) -> void:
+	if not _action_cells.has(uid):
+		return
+	var box: Node = _action_cells[uid]["box"]
+	if is_instance_valid(box):
+		(box as Control).hide()      # 立刻不可见：queue_free 要到帧末才真删，中间这一帧别让它还画着
+		# 用 queue_free 而不是 free：可能是「点了按钮 → 回调里重建行 → 走到这里」，
+		# 那个正在发 pressed 信号的按钮还在自己的调用栈上，立即释放会被引擎拒绝。
+		box.queue_free()
+	_action_cells.erase(uid)
 
 
 ## 从主题类型 `_theme_type()` 取颜色，未定义时回退到令牌默认值。

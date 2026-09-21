@@ -61,9 +61,15 @@
 |---|---|
 | `TrendChart` / `MultiTrendChart` | 实时折线图（单图 / 多子图共享 X 轴） |
 | `IntensityMap` | 二维标量场伪彩图（坐标轴 + 色标条 + 逐列流式追加 + 悬停读数） |
-| `DataTable` | 可拖拽调列宽的数据表（`Tree` 不支持拖拽） |
-| `TreeTable` | 树状表格：层级展开/收起 + 可拖拽调列宽 + 行选中（`TreeTableItem` 是行对象） |
-| `ColumnTable` | 上两者的公共基类（列宽拖拽机制）；换宽度用 `set_min_width()`，高度由内容自动上报（别去写 `custom_minimum_size.y`，会覆盖掉自动高度） |
+| `DataTable` | 可拖拽调列宽的数据表（`Tree` 不支持拖拽）+ 行内按钮 |
+| `TreeTable` | 树状表格：层级展开/收起 + 可拖拽调列宽 + 行选中 + 行内按钮（`TreeTableItem` 是行对象） |
+| `ColumnTable` | 上两者的公共基类（列宽拖拽 + 单元格按钮机制）；换宽度用 `set_min_width()`，高度由内容自动上报（别去写 `custom_minimum_size.y`，会覆盖掉自动高度） |
+
+行内按钮（「开始 / 暂停 / 删除」这类按行操作）用 `set_row_actions(uid, 列, 规格数组)`
+（树表 `set_item_actions(item, 列, 规格数组)`），发 `cell_action_pressed(uid, index, action)`。
+要点：用 `Cell*` 系列变体（普通按钮 32px 高，塞进 30px 的行里会顶到分隔线）；
+按钮列要留够宽度（三个约 140px）；**换了行数据要重新配一次**（按钮只认 uid）；
+收起的行按钮自动隐藏、删行自动回收；点按钮不会顺带选中该行。
 | `FileDropBox` | 文件拖放框：拖入 = 输入路径，按钮调系统文件资源管理器 |
 | `LongPressButton` | 长按按钮（急停/启动等防误触场景） |
 | `Switch` / `PartitionIndicator` / `CircularProgressBar` | 开关 / 分段指示灯 / 环形进度 |
@@ -110,7 +116,8 @@
 - 主题：由 `theme_palette.gd`（令牌）+ `theme_factory.gd`（构建）生成，`ThemeManager` 启动时应用到根窗口。
   **改样式只编辑 `theme_palette.gd`**；不要 per-control 打补丁（`theme = ...`、`add_theme_font_size_override`、`add_theme_color_override`），
   语义样式用 `theme_type_variation`。
-- 可用类型变体：按钮 `AccentButton`/`DangerButton`/`SuccessButton`/`GhostButton`/`CapsuleButton`；
+- 可用类型变体：按钮 `AccentButton`/`DangerButton`/`SuccessButton`/`GhostButton`/`CapsuleButton`
+  以及表格单元格用的紧凑版 `CellButton`/`CellAccentButton`/`CellSuccessButton`/`CellDangerButton`；
   标签 `PageTitle`/`SectionTitle`/`CardTitle`/`Subtitle`/`Caption`/`LogLabel`/`PathLabel`/`DropHint`/`ValueText`；
   状态 `StatusIdle`/`StatusOk`/`StatusWarn`/`StatusError`。缺层级时在 `theme_factory.gd` 的 `_add_label_variation()` 里加一个。
 

@@ -137,6 +137,53 @@ func _theme_type() -> StringName:
 	return &"TreeTable"
 
 
+# ---------- 单元格按钮（ColumnTable 钩子） ----------
+
+## 给某一行配按钮的便捷写法（内部按 `item.uid` 走通用机制）。
+## 收起的行会被自动隐藏、展开后自动回来；行被 `remove()` 掉则连按钮一起回收。
+func set_item_actions(item: TreeTableItem, col: int, specs: Array) -> void:
+	if item == null:
+		return
+	set_row_actions(item.uid, col, specs)
+
+
+## 按 uid 找回行对象 —— 接 `cell_action_pressed(uid, ...)` 时用它换回业务数据。
+func get_item_by_uid(uid: int) -> TreeTableItem:
+	return _find_by_uid(_root, uid)
+
+
+func _find_by_uid(item: TreeTableItem, uid: int) -> TreeTableItem:
+	for c in item._children:
+		if c.uid == uid:
+			return c
+		var hit := _find_by_uid(c, uid)
+		if hit != null:
+			return hit
+	return null
+
+
+func _layout_rows() -> Array:
+	var out: Array = []
+	var top := ThemePalette.TABLE_HEADER_H
+	for item in _visible:
+		out.append({"uid": item.uid, "top": top, "height": ThemePalette.TABLE_ROW_H})
+		top += ThemePalette.TABLE_ROW_H
+	return out
+
+
+## **含被折叠的行**：折叠只是暂时不画，按钮要留着（展开时还得回来）。
+func _all_row_uids() -> Array:
+	var out: Array = []
+	_collect_uids(_root, out)
+	return out
+
+
+func _collect_uids(item: TreeTableItem, out: Array) -> void:
+	for c in item._children:
+		out.append(c.uid)
+		_collect_uids(c, out)
+
+
 # ---------- 内部 ----------
 
 ## 行结构 / 内容变化后的统一入口（`TreeTableItem` 会调它）。
@@ -205,8 +252,9 @@ func _rebuild_visible() -> void:
 		item_selected.emit(null)
 	if _hovered != null and not _visible.has(_hovered):
 		_hovered = null
-	# 可见行数变了 → 高度也变了，让容器重新问一次最小尺寸
+	# 可见行数变了 → 高度也变了，让容器重新问一次最小尺寸；单元格按钮也要跟着重新摆
 	update_minimum_size()
+	_relayout_actions()
 	queue_redraw()
 
 

@@ -17,7 +17,15 @@ extends Object
 ## （非追踪 GC），环上的对象永远不会被回收。表格反复重建（例如每秒刷新一次设备列表）
 ## 就会稳定泄漏。改成显式所有权后，生命周期与原生 `TreeItem` 一致，也没有环。
 ##
-## 单元格文本一律是 `String`：本项目表格不做内嵌控件，保持自绘的简单与一致。
+## 单元格文本一律是 `String`（表格本体是自绘的）。要在行里放按钮，用表格的
+## `set_item_actions(item, col, specs)` —— 那是表格管理的真实 `Button` 节点，
+## 不归行对象管（行对象是 `Object`，不持有任何节点）。
+
+## 这一行的稳定标识（自增、永不复用）。`TreeTable` 用它给单元格按钮定位 ——
+## 用整数而不是对象引用，是为了避免「行被释放了、按钮节点还记着它」这类悬空比较。
+static var _uid_counter := 0
+
+var uid := 0                             # 见上（自增整数，创建后不再变）
 
 var _table: Node = null                  # 所属 TreeTable（用 Node 类型：避免与 TreeTable 循环引用）
 var _parent: TreeTableItem = null
@@ -30,6 +38,8 @@ var _depth := 0
 
 
 func _init(table: Node = null, parent: TreeTableItem = null) -> void:
+	_uid_counter += 1
+	uid = _uid_counter
 	_table = table
 	_parent = parent
 

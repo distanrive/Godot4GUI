@@ -47,9 +47,9 @@ func _build() -> void:
 	var root := HBoxContainer.new()
 	margin.add_child(root)
 
-	# 左侧导航
+	# 左侧导航（宽度要放得下底部的「界面缩放」下拉，否则选项文字会被截断）
 	var nav := VBoxContainer.new()
-	nav.custom_minimum_size = Vector2(150, 0)
+	nav.custom_minimum_size = Vector2(180, 0)
 	nav.add_theme_constant_override("separation", 4)
 	root.add_child(nav)
 
@@ -641,32 +641,81 @@ func _section_tables() -> void:
 	_section_box.add_child(_caption(
 		"ItemList 是原生控件，样式走全局主题；高度给多少显示多少，超出的部分自己出滚动条。"))
 
-	# ---- DataTable（自绘，可拖拽调列宽）----
+	# ---- DataTable（自绘，可拖拽调列宽，末列带行内按钮）----
 	var table := DataTable.new()
 	table.set_columns(
-		PackedStringArray(["参数", "数值", "单位"]),
-		PackedFloat32Array([180.0, 120.0, 90.0]))
-	var rows: Array = [["设备", "—", "—"]]
-	for i in range(4):
-		rows.append(["通道 %d" % (i + 1), "%.1f" % (i * 1.5 + 10.0), "V" if i % 2 == 0 else "mA"])
+		PackedStringArray(["通道", "数值", "单位", "操作"]),
+		PackedFloat32Array([110.0, 90.0, 70.0, 150.0]))
+	var rows: Array = []
+	for i in range(5):
+		rows.append(["通道 %d" % (i + 1), "%.1f" % (i * 1.5 + 10.0),
+				"V" if i % 2 == 0 else "mA", ""])       # 操作列不放文字，由按钮占位
 	table.set_rows(rows)
-	# 只给宽度；高度由控件按行数自动上报，不要去设 custom_minimum_size.y
-	table.set_min_width(390.0)
+	# 只给宽度；高度由控件按行数自动上报，不要去设 custom_minimum_size.y。
+	# 宽度要给够：操作列是最后一列（自动填满剩余宽度），三个按钮约需 140px。
+	table.set_min_width(540.0)
 	table.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_section_box.add_child(_card("DataTable（可拖拽调列宽）", table))
+
+	var table_out := Label.new()
+	table_out.theme_type_variation = "PathLabel"
+	table_out.text = "cell_action_pressed → （点一下行内按钮）"
+	table.cell_action_pressed.connect(func(uid: int, index: int, action: String):
+		table_out.text = "cell_action_pressed → 第 %d 行（uid=%d）的「%s」" % [uid + 1, uid, action])
+	for i in rows.size():
+		table.set_row_actions(i, 3, _demo_actions())
+
+	# 参数变了要重新配一次按钮（按钮只认 uid，不会自动跟着行数据走）——
+	# 这里演示用：点「重设数据」后行数变了，按钮得重配。
+	var rebuild := Button.new()
+	rebuild.text = "重设数据（3 行）"
+	rebuild.theme_type_variation = "CapsuleButton"
+	rebuild.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	rebuild.pressed.connect(func():
+		var new_rows: Array = []
+		for i in range(3):
+			new_rows.append(["重设 %d" % (i + 1), "%.1f" % (i * 3.0), "A", ""])
+		table.clear_all_actions()
+		table.set_rows(new_rows)
+		for i in new_rows.size():
+			table.set_row_actions(i, 3, _demo_actions())
+		table_out.text = "行数据换了，按钮已重新配置")
+
+	var table_box := VBoxContainer.new()
+	table_box.add_theme_constant_override("separation", 8)
+	table_box.add_child(table)
+	table_box.add_child(rebuild)
+	table_box.add_child(table_out)
+	_section_box.add_child(_card("DataTable（可拖拽调列宽 + 行内按钮）", table_box))
 	_section_box.add_child(_caption(
 		"DataTable 为自绘数据表：拖动表头分隔线调列宽，最后一列自动填满剩余宽度；"
-		+ "Godot 的 Tree 做不到这一点。高度按行数自动上报，调用方只管宽度。"))
+		+ "Godot 的 Tree 做不到这一点。高度按行数自动上报，调用方只管宽度。"
+		+ " 末列的「开始/暂停/删除」是 `set_row_actions()` 放进去的**真实 Button**，"
+		+ "所以主题变体（CellSuccessButton 等）与禁用态都照常生效。"))
 
 	_add_tree_table_section()
+
+
+## 演示用的行内按钮规格（开始 / 暂停 / 删除）。
+## 用 `Cell*` 变体：普通按钮 32px 高，塞进 30px 的行里会顶到分隔线。
+func _demo_actions() -> Array:
+	return [
+		{"text": "开始", "action": "start", "variation": "CellSuccessButton",
+			"tooltip": "启动这一路"},
+		{"text": "暂停", "action": "pause", "variation": "CellButton",
+			"tooltip": "暂停采集（可恢复）"},
+		{"text": "删除", "action": "delete", "variation": "CellDangerButton",
+			"tooltip": "删除这一项（不可撤销）"},
+	]
 
 
 ## 树状表格演示：三层「设备 → 通道 → 测量项」，另配展开/收起与选中读数的按钮。
 func _add_tree_table_section() -> void:
 	var tree := TreeTable.new()
+	# 单位并进「数值」列，把最后一列让给操作按钮
 	tree.set_columns(
-		PackedStringArray(["设备 / 通道 / 测量项", "状态", "数值", "单位"]),
-		PackedFloat32Array([260.0, 90.0, 90.0, 60.0]))
+		PackedStringArray(["设备 / 通道 / 测量项", "状态", "数值", "操作"]),
+		PackedFloat32Array([210.0, 70.0, 90.0, 150.0]))
+	tree.set_min_width(540.0)
 
 	# 三层数据：层级**不要**写进文本里（不要手写 └ / ├），
 	# 缩进与引导线由 TreeTable 自己画，文本里再写一遍就是重复的层级标记。
@@ -684,17 +733,30 @@ func _add_tree_table_section() -> void:
 		var dev := tree.create_item()
 		dev.set_cells(PackedStringArray([spec[0], spec[1], "—", ""])).set_expanded(true)
 		dev.set_metadata({"kind": "device", "name": spec[0]})
+		# 设备行给「开始/暂停/删除」
+		tree.set_item_actions(dev, 3, _demo_actions())
 		for chan_spec in spec[2]:
 			var chan := tree.create_item(dev)
 			chan.set_cells(PackedStringArray([chan_spec[0], chan_spec[1], "—", ""]))
 			chan.set_metadata({"kind": "channel", "name": chan_spec[0]})
 			# 展开到第三层，好把「多级引导线」和「最后一个子项收成 └」都演示出来
 			chan.set_expanded(not chan_spec[2].is_empty())
+			# 通道行只给「暂停/删除」——演示「不同行可以配不同的按钮」与禁用态：
+			# 报警中的通道不允许删（真实的工控里这条很常见）
+			var alarming: bool = chan_spec[1] == "报警"
+			tree.set_item_actions(chan, 3, [
+				{"text": "暂停", "action": "pause", "variation": "CellButton"},
+				{"text": "删除", "action": "delete", "variation": "CellDangerButton",
+					"disabled": alarming,
+					"tooltip": "报警中的通道不允许删除" if alarming else "删除这一路（不可撤销）"},
+			])
 			for point_spec in chan_spec[2]:
 				var point := tree.create_item(chan)
+				# 数值带上单位（单位列已让给操作列）
 				point.set_cells(PackedStringArray([point_spec[0], "",
-						point_spec[1], point_spec[2]]))
+						"%s %s" % [point_spec[1], point_spec[2]], ""]))
 				point.set_metadata({"kind": "point", "name": point_spec[0]})
+				# 叶子（测量项）不给按钮：行内按钮是「按行配」的，不是每行都有
 
 	var readout := Label.new()
 	readout.theme_type_variation = "PathLabel"
@@ -705,6 +767,11 @@ func _add_tree_table_section() -> void:
 			readout.text += "『%s』 %s" % [item.get_cells()[0], str(item.get_metadata())])
 	tree.item_activated.connect(func(item: TreeTableItem):
 		readout.text = "item_activated（双击）→ 『%s』" % item.get_cells()[0])
+	# 行内按钮：拿 uid 换回行对象，再取它的业务数据
+	tree.cell_action_pressed.connect(func(uid: int, index: int, action: String):
+		var item := tree.get_item_by_uid(uid)
+		var name := item.get_cells()[0] if item != null else "（行已删除）"
+		readout.text = "cell_action_pressed → 对『%s』执行 %s" % [name, action])
 
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 8)
@@ -731,8 +798,8 @@ func _add_tree_table_section() -> void:
 	# 放在 ScrollContainer 里：TreeTable 会把自己的最小高度同步成「表头 + 可见行数 × 行高」，
 	# 所以行数超出这个框时由外层滚动，不需要控件内部再做滚动。
 	var scroll := ScrollContainer.new()
-	# 给够高度，让展开到第三层（12 行）时整棵树都看得见，不用滚
-	scroll.custom_minimum_size = Vector2(0, 360)
+	# 给够高度，让展开到第三层（12 行 × 30px 行高 + 表头）时整棵树都看得见，不用滚
+	scroll.custom_minimum_size = Vector2(0, 400)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.add_child(tree)
@@ -743,11 +810,15 @@ func _add_tree_table_section() -> void:
 	box.add_child(scroll)
 	box.add_child(buttons)
 	box.add_child(readout)
-	_section_box.add_child(_card("TreeTable（树状表格：层级 + 可拖拽调列宽）", box))
+	_section_box.add_child(_card("TreeTable（树状表格：层级 + 可拖拽调列宽 + 行内按钮）", box))
 	_section_box.add_child(_caption(
 		"TreeTable 解决 Godot 原生 Tree 的两个短板：列宽不能拖（get_column_width 只读）"
 		+ "、样式不走本项目主题。层级用 create_item(parent) 建，点箭头展开/收起，"
-		+ "双击一行发 item_activated。要滚动就把它放进 ScrollContainer —— 控件会自己算最小高度。"))
+		+ "双击一行发 item_activated。要滚动就把它放进 ScrollContainer —— 控件会自己算最小高度。"
+		+ "\n末列的按钮用 `set_item_actions(item, 列号, 规格数组)` 配：设备行是「开始/暂停/删除」，"
+		+ "通道行只有「暂停/删除」（通道 2 在报警，它的「删除」是**禁用**的），"
+		+ "叶子测量项**没有**按钮 —— 行内按钮是按行配的、不必每行都有。"
+		+ "收起的行按钮会自动隐藏、展开后回来；行被 remove() 掉则连按钮一起回收。"))
 
 
 func _section_chart() -> void:
