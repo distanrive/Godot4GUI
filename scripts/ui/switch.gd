@@ -9,10 +9,23 @@ signal toggled(on: bool)
 
 var button_pressed := false
 
+## 禁用：置灰 + 不吃点击。
+## `Control` 没有 `disabled`（那是 `BaseButton` 的），而本控件是自绘的，
+## 所以这里自己补一个 —— 否则任何「条件不满足时置灰」的场景都只能在业务层自己挡点击。
+var disabled := false:
+	set(v):
+		disabled = v
+		mouse_default_cursor_shape = Control.CURSOR_ARROW if v else Control.CURSOR_POINTING_HAND
+		# 用 modulate.a 做置灰（**不是** 用 modulate 改颜色 —— 那会把颜色乘暗、越乘越糊）。
+		# 与 FlashLabel 的做法一致：透明度闪烁/变暗是 modulate.a 的正当用法。
+		modulate.a = 0.45 if v else 1.0
+		queue_redraw()
+
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(48, 26)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 
 func set_pressed(v: bool) -> void:
@@ -35,6 +48,8 @@ func is_pressed() -> bool:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if disabled:
+		return          # 禁用时不吃点击（置灰只是外观，行为也要挡住）
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		set_pressed(not button_pressed)
 		accept_event()

@@ -73,10 +73,12 @@ Godot4GUI/
 │   └── requirements.txt
 ├── tools/
 │   ├── new_project.py            # 脚手架：以本模板生成新项目（生成即可 F5 跑通）
+│   ├── checks/                   # 常驻回归检查（headless 一条命令跑，失败返回非零退出码）
 │   └── skeleton/                 # 新项目的起始页面/后端骨架/README/CLAUDE 模板（含 .gdignore）
 └── docs/
     ├── new-project-guide.md        # 【起新项目看这篇】完整开发指引
     ├── gdscript-only-guide.md      # 不用 Python 后端（纯 GDScript）时的写法、线程与性能红线
+    ├── godot-facts-verified.md     # Godot 4.7 实测事实与坑（每条标注核验状态）
     ├── todo.md                     # 当前状态、待办、未决问题与关键决定记录
     ├── siliconui-godot-mapping.md  # PyQt-SiliconUI -> Godot 迁移对照表
     └── plotting-alternatives.md    # 替代 matplotlib 的调研、选型与踩坑
@@ -144,6 +146,10 @@ Godot4GUI/
   也**不要**改成「扫 PATH 找 python」——工控机上多版本 Python 是常态，静默挑错解释器只会让后端悄无声息地起不来。
 - **界面缩放/窗口尺寸交给 `AppShell`**：`content_scale_factor` + `Window.min_size` + `user://config.cfg` 记忆。
   界面里给用户一个 `UiScaleOption.new()` 即可。不要把窗口尺寸/缩放写死在业务脚本里。
+  **首次运行的窗口尺寸不要依赖 `project.godot` 的 `display/window/size/viewport_*`** ——
+  那个值是**物理**像素、不乘缩放系数，125% 缩放下「1280×800」实际是逻辑 1024×640，
+  正好等于最小尺寸，窗口就会每次都以最小尺寸打开。`AppShell` 按逻辑设计尺寸
+  （`WINDOW_DEFAULT_*`）× 缩放换算，并钳进可用屏幕，不要在自己的脚本里再设一遍。
 - 业务脚本要存自己的配置，用 `AppShell.config`（同一个 `user://config.cfg`，分自己的段），改完调 `AppShell.save_config()`。
 - 后端消息是 JSON 字典，用 `type` 字段分发。
 - 主题：由 `scripts/theme/theme_palette.gd`（设计令牌）+ `theme_factory.gd`（构建）生成，`ThemeManager` autoload 启动时应用到根窗口，作用于所有控件与弹窗。**改样式只编辑 `theme_palette.gd`**；不要在单个控件上 `theme = ...` 打补丁，也不要用 `add_theme_font_size_override` / `add_theme_color_override` 改常规样式，语义样式用 `theme_type_variation`。
@@ -197,6 +203,17 @@ Godot4GUI/
 - 浮点纹理（`FORMAT_RF`）用 `TEXTURE_FILTER_NEAREST`：逐格显示更像 `pcolormesh`，也避开老 GPU 缺 `OES_texture_float_linear` 的问题。
 - **主题只在「Control 的父链全是 Control/Window」时才生效**：中间夹一个普通 `Node`，其下的控件就拿不到主题（`get_theme_constant` 会返回引擎默认值）。写测试脚本包场景时尤其容易踩。
 - 拖放/文件对话框：`FileDialog.file_mode` 默认是 `FILE_MODE_SAVE_FILE`，取文件必须显式设成 `FILE_MODE_OPEN_FILE`。
+- **长文本 `Label` 的最小宽度 = 整串文字的宽度**：放进 `HBoxContainer`/`GridContainer` 会把容器最小宽度顶大，
+  窗口装不下就横向溢出（右边的按钮被切掉）。实测一段 46 字中文的 `Label` 最小宽度 **672px**。
+  三种解法都有效（实测）：`clip_text = true` → 1px、`text_overrun_behavior = OVERRUN_TRIM_ELLIPSIS` → 1px、
+  `autowrap_mode != OFF` **且**给 `custom_minimum_size.x` → 该宽度。
+  （`clip_text` 或 `overrun != NO_TRIMMING` 时引擎直接返回 `Size2(1, 高度)`，所以它们**能**压小最小宽度。）
+- **`StreamPeerTCP` 必须先 `poll()`，`get_status()` / `get_available_bytes()` 才会更新**
+  （4.7 里 `poll()` 在父类 **`StreamPeerSocket`** 上，找文档容易找错类）。不 poll 会永远停在
+  `STATUS_CONNECTING`，而且很难看出原因 —— 用 TCP 端口做单实例锁时就踩过。
+- **更多 Godot 4.7 实测事实**（编码名只认 `gb2312`/`gb18030`、`to_multibyte_char_buffer()` 带结尾 NUL、
+  `PopupMenu` 分隔线占下标、`get_theme_color()` 没有默认值重载、`.bat` 的三条硬约束……）：
+  见 **`docs/godot-facts-verified.md`**（每条都标了「已验 / 待验 / 已修正」）。
 - **GDScript 的 lambda 按值捕获局部变量**：在 `connect(func(...): ...)` 里给外层的**局部**变量赋值，
   只改到 lambda 自己那份副本，外面看到的还是原值（写信号回调测试时踩过：`var got := []; ...connect(func(...): got = [...]);`
   结果 `got` 永远是空的）。两种正确写法：把结果放到**成员变量**里（`_clicked = [...]`，走 `self` 能写回去），

@@ -19,10 +19,16 @@
 | 每帧要处理一张图像（逐像素） | **纯 GDScript，但必须走 `Image`/着色器**，见 §3 |
 | 计算要跑几分钟、还要能中途取消 | **要 Python**（放到独立进程，UI 才不会被拖住） |
 | 要复用已有的 Python 代码/设备 SDK | **要 Python** |
-| 想让最终交付只有一个 exe、不装 Python | **纯 GDScript** 是最省事的路 |
+| 想让最终交付只有一个 exe、不装 Python | **纯 GDScript** 是最省事的路（**注意 exe 体积**，见 §5 末条） |
 
 一句话：**算得少就近算，算得多就分家。** 分不分家的判据是「计算量级」和「有没有现成库」，
 不是「架构好不好看」。
+
+> 这张表不是纸上推演：`docs/todo.md` 里那些「已完成并验证」的项，大部分就是按这条路
+> 做出来的（界面/布局/控件/配置全在 GDScript 里，只有 FFT 那步交给 Python）。
+> 唯一的坑是交付体积，见 §5 最后一条。
+> 想直接看「纯 GDScript 程序长什么样」：`scenes/gallery.tscn` 本身就是一个 ——
+> 它从来不需要后端。
 
 ---
 
@@ -241,5 +247,16 @@ Bessel 出来），但准确度、可维护性、可验证性都要自己扛 —
 - **纯 GDScript 项目的部署优势**：导出一个 exe 就完事，工控机上不用装 Python、
   不用配虚拟环境、不会遇到「服务器上 numpy 版本不对」这类问题。
   这是它最实际的收益。
+- **但先掂量一下这个 exe 的体积**：用官方编辑器直接导出，**上 100 MB 是常态**
+  （实测约 104 MB）—— 里面塞了 3D、音频、导航、XR、各种图片编解码、联机等等整个引擎。
+  这是「要不要用 Godot 替代 Qt/tkinter」这个决策里最现实的反对意见，所以先看分发方式：
+  内网 U 盘拷几台机器通常无所谓；要发几十台、或走网络分发，就得考虑下面这条。
+  想要合理体积**必须自己编一份精简引擎模板**：关掉用不到的模块 + `disable_3d=yes`
+  `optimize=size_extra lto=full`，实测 **104 MB → 34 MB**（压缩包 28 → 9 MB），
+  20 核编译约 4 分钟。两个坑：**`module_webp` 绝不能关**（Godot 的纹理导入内部用 WebP
+  存 `.ctex`，关了所有贴图都会加载失败），`svg` / `text_server_adv` / `freetype` / `glslang`
+  也必须留（图标、中文排版、字体渲染、着色器编译），另外留 `opengl3` 兜底 RDP/虚拟机。
+  工具链：`pip install scons` + `winget install BrechtSanders.WinLibs.POSIX.UCRT`
+  （**不需要 Visual Studio** —— Godot 官方 Windows 二进制本来就是 MinGW 编的）。
 - **一条经验**：本模板的 `scenes/gallery.tscn` 从来不需要后端就能跑 ——
   它就是一个「纯前端 GDScript 程序」的现成例子，可以从它开始改。

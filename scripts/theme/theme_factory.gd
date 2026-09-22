@@ -317,6 +317,11 @@ static func _custom_types(t: Theme) -> void:
 	t.set_color("knob_color", "Switch", ThemePalette.SURFACE)
 
 	t.set_color("progress_color", "LongPressButton", Color(ThemePalette.ACCENT, 0.85))
+	# 实底语义变体上的长按按钮：底色是红的/绿的/主色，进度条用半透明白才看得见
+	# （原来进度条写死按 LongPressButton 取蓝色，套了 DangerButton 就几乎看不见了）
+	for typ in ["AccentButton", "DangerButton", "SuccessButton", "CellAccentButton",
+			"CellSuccessButton", "CellDangerButton"]:
+		t.set_color("progress_color", typ, Color(1.0, 1.0, 1.0, 0.55))
 
 	# 数据表（DataTable）
 	t.set_color("header_bg_color", "DataTable", ThemePalette.SURFACE_ALT)

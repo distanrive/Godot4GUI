@@ -49,8 +49,11 @@ func _ready() -> void:
 		_restore_window = false
 
 	_apply_scale()
+	var restored := false
 	if _restore_window:
-		_restore_window_geometry()
+		restored = _restore_window_geometry()
+	if not restored:
+		_apply_default_window_size(_effective_scale())
 
 	var win := get_window()
 	win.size_changed.connect(_on_window_changed)
@@ -58,8 +61,11 @@ func _ready() -> void:
 	set_process(true)
 	# 打一行出来：「界面怎么这么大/这么小」在工控机上是最常被问的问题，
 	# 有这行就能立刻区分是系统 DPI、配置文件还是命令行参数导致的。
-	print("[AppShell] 界面缩放 %.2f×（来源：%s），窗口 %d×%d，最小 %s" % [
-		_effective_scale(), source, win.size.x, win.size.y, str(win.min_size)])
+	print("[AppShell] 界面缩放 %.2f×（来源：%s），窗口 %d×%d（逻辑 %d×%d，%s），最小 %s" % [
+		_effective_scale(), source, win.size.x, win.size.y,
+		int(win.size.x / _effective_scale()), int(win.size.y / _effective_scale()),
+		"沿用上次" if restored else "首次运行，用默认尺寸",
+		str(win.min_size)])
 
 
 func _process(delta: float) -> void:
@@ -165,17 +171,43 @@ func _update_min_size(factor: float) -> void:
 			int(round(ThemePalette.WINDOW_MIN_H * factor)))
 
 
-func _restore_window_geometry() -> void:
+## 从配置恢复窗口几何。**返回是否真的恢复过** —— 没恢复（首次运行）时调用方要补一个默认尺寸。
+func _restore_window_geometry() -> bool:
 	var win := get_window()
 	if win == null:
-		return
+		return false
 	if bool(config.get_value(_SEC_WINDOW, "maximized", false)):
 		win.mode = Window.MODE_MAXIMIZED
-		return
+		return true
 	var w := int(config.get_value(_SEC_WINDOW, "width", 0))
 	var h := int(config.get_value(_SEC_WINDOW, "height", 0))
 	if w > 0 and h > 0:
 		win.size = Vector2i(maxi(w, win.min_size.x), maxi(h, win.min_size.y))
+		return true
+	return false
+
+
+## 首次运行时定窗口尺寸。
+##
+## 为什么不能靠 `project.godot` 的 viewport 值：那个是**物理**像素、**不乘缩放系数**。
+## 于是 125% 缩放下「1280×800」变成逻辑 1024×640 —— 正好等于 `WINDOW_MIN_*`，
+## 窗口每次都以最小尺寸打开，看起来就是「这软件怎么一启动就这么小」。
+## （实测：scale=1.25 时窗口物理 1280×800、逻辑 1024×640，就是这个原因。）
+##
+## 这里按**逻辑**设计尺寸（`WINDOW_DEFAULT_*`）× 缩放 换成物理，再钳进可用屏幕区域，
+## 免得在小屏（或 200% 缩放）上开出一个装不下的窗口。
+func _apply_default_window_size(factor: float) -> void:
+	var win := get_window()
+	if win == null:
+		return
+	var wanted := Vector2(ThemePalette.WINDOW_DEFAULT_W, ThemePalette.WINDOW_DEFAULT_H) * factor
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	if usable.size.x > 0 and usable.size.y > 0:
+		wanted.x = minf(wanted.x, float(usable.size.x))
+		wanted.y = minf(wanted.y, float(usable.size.y))
+	win.size = Vector2i(
+			maxi(int(wanted.x), win.min_size.x),
+			maxi(int(wanted.y), win.min_size.y))
 
 
 func _on_window_changed() -> void:

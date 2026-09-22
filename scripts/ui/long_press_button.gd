@@ -42,7 +42,19 @@ func _draw() -> void:
 	if show_progress and _was_pressed and not _triggered and hold_duration > 0.0:
 		var ratio := clampf(_accum / hold_duration, 0.0, 1.0)
 		var bar := Rect2(Vector2(0, size.y - 3.0), Vector2(size.x * ratio, 3.0))
-		var col := get_theme_color("progress_color", &"LongPressButton") \
-				if has_theme_color("progress_color", &"LongPressButton") \
-				else Color(ThemePalette.ACCENT, 0.85)
-		draw_rect(bar, col, true)
+		draw_rect(bar, _progress_color(), true)
+
+
+## 进度条颜色：**先看当前 `theme_type_variation`，再回落 `LongPressButton`，最后才是令牌默认**。
+##
+## 这里必须按变体查：套了 `DangerButton` 之类的语义变体时，按钮底色是红的，
+## 而进度条原来是写死按 `&"LongPressButton"` 取的（蓝色）—— 红底上的蓝条几乎看不见。
+## `theme_factory.gd` 里给那几个实底变体都定义了 `progress_color`（半透明白），
+## 所以红底/绿底/主色底上都能看清。
+func _progress_color() -> Color:
+	var variation := theme_type_variation
+	if not variation.is_empty() and has_theme_color("progress_color", variation):
+		return get_theme_color("progress_color", variation)
+	if has_theme_color("progress_color", &"LongPressButton"):
+		return get_theme_color("progress_color", &"LongPressButton")
+	return Color(ThemePalette.ACCENT, 0.85)

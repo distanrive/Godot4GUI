@@ -13,10 +13,14 @@
   主题系统、自绘控件库（`scripts/ui/` 共 18 个脚本）、WebSocket 通信骨架与后端自动拉起、
   窗口/DPI 适配、一个真实数值算例（Rayleigh-Sommerfeld 衍射逐距离刷新）、
   以及「一条命令生成新项目」的脚手架。
-- **最重要的三个入口**：
+- **最重要的四个入口**：
   - 看控件/改样式：跑 `scenes/gallery.tscn`（无需后端）
   - 看完整链路：跑 `scenes/main.tscn`（F5 即可，后端会自己起来）
   - 不用 Python 的写法：`docs/gdscript-only-guide.md`
+  - 「这行为怎么这么怪」：`docs/godot-facts-verified.md`（Godot 4.7 实测事实/坑，每条标了核验状态）
+- **第 2.E 节有几项「已记录待实现」**（状态点控件、便携路径、单实例、导出预设与打包脚本、
+  精简引擎模板配方）—— 来自下游 `wlt_login` 的报告，用户决定后续再挑时间做；
+  每项都写了实现要点和坑，想动手直接从那里看。
 - **改自绘控件时，用「自截图 + 放大」验收**（光跑 headless 不报错不代表画对了 —— 表格被裁、
   树线悬空这类问题 headless 一点错都不报）。做法：写个临时 `extends SceneTree` 脚本，
   `root.add_child()` 控件 → `await process_frame` 若干帧 → `root.get_texture().get_image().save_png("user://shot.png")`，
@@ -29,11 +33,11 @@
   （60000 帧 ≈ 7 分钟）。自测用 `--quit-after 90~150` 看报错、`3000~4000` 跑完整链路。
 - **`project.godot` 被编辑器重写过后是「极简」的**：只剩非默认项。上面那些渲染器/拉伸模式
   因为值等于引擎默认，文件里**看不到**（这是正常的，别去补写回来，编辑器保存一次又会抹掉）。
-- **git 基线**：`9b3a2d9`。**工作区尚未提交** —— 2026-09-21 两批改动（第 1 节 13~22 项）
-  都在工作区里，新会话接手时先 `git status` 看一眼、确认这批改动是否已经提交过。
-- **未提交的改动清单**：16 个文件修改 + 9 个新文件（`app_shell.gd`、`backend_launcher.gd`、
-  `column_table.gd`、`tree_table.gd`、`tree_table_item.gd`、`ui_scale_option.gd`、
-  `docs/gdscript-only-guide.md`、`docs/todo.md`、以及两个关闭图标）。
+- **`docs/godot-facts-verified.md`**：Godot 4.7 的实测事实/坑总集（编码名、Label 最小宽度、
+  `StreamPeerTCP.poll`、`.bat` 约束……），每条标了核验状态。遇到「这行为有点怪」先翻它。
+- **git**：截至本文更新，第 1 节 13~28 项**已经提交过了**（用户自行提交），
+  29~32 项（本轮：窗口尺寸 / Switch 禁用 / 长按进度条色 / 事实核验文档）在工作区里。
+  新会话接手先 `git status` 确认一下。
 
 ---
 
@@ -64,6 +68,10 @@
 | 26 | `_on_columns_changed()` 名不副实（同一份报告的第 2 条） | 同上 | 改成真正的统一入口：`update_minimum_size()` + `_on_widths_changed()`（后者 = 重摆按钮 + `queue_redraw()`）。拖拽走 `_on_widths_changed()`，**刻意不调 `update_minimum_size()`**（拖拽每秒上百个 motion 事件，行高又不会变） |
 | 27 | **新增常驻回归检查** `tools/checks/table_actions.gd` | 14 条断言，headless 一条命令跑完。**反向验证过**：把补丁退回去 → `[check] FAIL`、退出码 1、并打印「按钮没跟着列宽走（实际 0.0）」；补丁回来 → `PASS` / 0 | 这是模板里**第一个常驻检查**（此前都是临时脚本、跑完就删），C1 的雏形 |
 | 28 | 窗口标题去掉 ` (DEBUG)` 后缀（同一份报告的第 3 条） | 用**非 console** 的 Godot 起真窗口，PowerShell 读 OS 标题，三种写法各跑一遍 | 报告属实，我独立复现了：`Window.title` → `X (DEBUG)`；`DisplayServer.window_set_title` 写在首帧前 → `Godot4GUI (DEBUG)`（被引擎盖掉）；等一帧再调 → `X` ✅。已封装成 `AppShell.set_window_title()` |
+| 29 | **首次运行窗口尺寸被最小尺寸顶住**（wlt_login 报告 A 表第一条，**它标的优先级最高是对的**） | 删 `user://config.cfg` 后起真窗口读 `[AppShell]` 日志；再逐条核验控件修复（8 条断言） | 属实且**我自己的旧数据里就有证据**（125% 缩放下窗口物理 1280×800 = 逻辑 1024×640 = 恰好最小尺寸，我当时没看出含义）。已加 `WINDOW_DEFAULT_*` + `_apply_default_window_size()`：按逻辑尺寸 × 缩放换算再钳进可用屏幕。修完实测物理 1600×1000 = **逻辑 1280×800** ✔ |
+| 30 | `Switch` 补 `disabled` | 临时脚本 8 条断言：置灰（`modulate.a=0.45`）、光标不是手型、点击无效、恢复后可点 | 全过。`Control` 没有 `disabled`（那是 `BaseButton` 的），自绘控件只能自己补 |
+| 31 | `LongPressButton` 的进度条颜色跟着 `theme_type_variation` 走 | 同上 | 修好：原来写死按 `&"LongPressButton"` 取（主色蓝），套 `DangerButton` 时红底上几乎看不见；现在优先按变体取，`theme_factory` 给实底语义变体定义了半透明白 |
+| 32 | **新增 `docs/godot-facts-verified.md`**：把两份上游报告里的事实**逐条核验**后归档 | 见该文件，每条标了「已验 / 待验 / 已修正」 | 其中 **B8 被订正**（报告说「`clip_text` 不能压小最小宽度」——错，实测 672 → **1**，`overrun != NO_TRIMMING` 同理）；B1/B3/B4/B11/B13 已验属实；B2/B5/B6/B9/B10/B12/B14 标「待验」没有当结论 |
 | 14 | **TreeTable 不泄漏内存** | 同一自检脚本发现「7 ObjectDB instances were leaked at exit」→ 改用 `Object` 显式所有权后重跑 | 泄漏归零。**踩到的坑**：`RefCounted` + 父子互引 = 引用环，引用计数永不回收；且 GDScript **不允许对象在自己的调用栈里 free 自己**（`Attempted to free a locked object`），故 `remove()` 把自己交给表去 `call_deferred("free")` |
 | 15 | **后端自动拉起（端到端）** | 清空端口占用 → 直接 `godot scenes/main.tscn -- --preset=fast --autostart` | 前端自动拉起 python（pid 记录在案）→ `hello_ack` 通过 → 97 列 / 1.5 s 跑完；**退出后端口释放、python 进程数归零**（`kill_on_exit` 生效） |
 | 16 | **脚手架项目也能自动拉起** | 生成新项目 → `--import` → 跑主场景 | `[app] 已连接后端。`，端口随后释放。**这条抓到一个真 bug**：骨架后端原来没有 `--log-file` 参数，argparse 会报 `unrecognized arguments` → 所有新生成项目的自动拉起都会失败（已修，并补上 `hello_ack`） |
@@ -97,6 +105,25 @@
 | B5 | 布局在**最大化**下的表现 | 拉伸模式已改 `disabled`，理论上最大化是「显示更多内容」；请在真机上拖动窗口确认伪彩图与参数栏的重排符合预期 |
 | B6 | Windows 导出流程 | 导出 exe（需 Export Templates）+ 后端打包。重点：`backend/` 目录要**随 exe 一起拷**（`res://` 里没有 `.py`），`BackendLauncher` 会找「exe 同级 `backend/main.py`」 |
 | B7 | 小窗口布局 | 最小窗口现在是 `WINDOW_MIN_W/H`（1024×640，随缩放），比它更小拖不动了。到 1024×640 时左侧参数栏会出现滚动条（功能正常，未细调）；嫌挤就调 `theme_palette.gd` 的 `SIDEBAR_W` / `WINDOW_MIN_*` |
+
+### E. 来自下游报告、**已记录待实现**（2026-09-22 用户决定暂缓，届时再挑）
+
+来源：`wlt_login` 项目回流的报告（A 表「可以直接合入的控件与模块」+ C 表「建议新增的工程化资产」）。
+报告里的事实类条目（B 表）已经逐条核验并归档到 **`docs/godot-facts-verified.md`**；
+下面是**还没实现的代码/资产**，连同「实现时的要点与坑」一起记在这儿，免得下次重新推一遍。
+（原始报告中更细的清单——比如精简模板那 48 个模块的关闭列表——在 wlt_login 项目那边。）
+
+| # | 事项 | 实现要点 / 坑 |
+|---|---|---|
+| E1 | `scripts/ui/status_dot.gd` **状态点**控件 | 自绘一个小圆点；**颜色不要新定义**，直接复用 `StatusIdle`/`StatusOk`/`StatusWarn`/`StatusError` 四个**标签变体**的 `font_color`（用 `get_theme_color("font_color", &"StatusOk")`）—— 这样「状态色唯一定义在 `theme_factory`」这条约束不破。模板现在的状态表达只有文字（`Status*` 标签），缺一个图形化的小指示 |
+| E2 | `scripts/autoload/app_paths.gd` **便携路径助手** | 「优先 exe 同级目录，写不进去再退 `user://`」—— 绿色版/便携版诉求。注意 `AppShell.CONFIG_PATH` 现在是 `const "user://config.cfg"`，**做便携版得把它从编译期常量改成运行期决定**（`AppShell` 与 `BackendLauncher` 的日志路径都要跟着走） |
+| E3 | `scripts/autoload/instance_guard.gd` **单实例** | TCP 端口当锁 + 「再开一次把已有窗口叫到前面」。**坑（他们第一版就是这么整个失效的）**：`StreamPeerTCP.get_status()` **必须先 `poll()` 才更新**，不 poll 会永远停在 `STATUS_CONNECTING`；另外 4.7 里 `poll()` 在父类 `StreamPeerSocket` 上。详见 `docs/godot-facts-verified.md` §3 |
+| E4 | **`export_presets.cfg`**（带注释的最小 Windows 预设） | 模板现在完全没有，每个下游都要在编辑器里手点一遍。注意路径/图标这些别写死成本机绝对路径，否则下游生成即错 |
+| E5 | **打包脚本 `build.bat` + 导出后冒烟测试** | 冒烟测试的价值：headless 跑 N 帧 grep **引擎级 `ERROR`** —— 他们靠它抓到「所有贴图加载失败」，那是**导出日志里完全看不出来**的问题（导出成功、pck 正常，只有运行时才炸）。两个坑：① `.bat` 的三条硬约束见 `docs/godot-facts-verified.md` §5；② **导出后的 release 构建不执行 `--script`**（该文档 §11，待验），所以冒烟测试**不能**靠 `--script`，得跑导出的 exe 本身（如 `--quit-after N`）再 grep 输出 |
+| E6 | **精简引擎模板配方**（~104 MB → ~34 MB） | 只写配方、不编译。必须保留：`module_webp`（**关了所有贴图加载失败**，Godot 的纹理导入内部用 WebP 存 `.ctex`）、`svg`、`text_server_adv`、`freetype`、`glslang`，另留 `opengl3` 兜底 RDP/老核显。工具链 `pip install scons` + `winget install BrechtSanders.WinLibs.POSIX.UCRT --source winget`（不需要 VS；`--source winget` 必须加）。结果指向 `docs/gdscript-only-guide.md` §5 —— 那里已经写了「体积这个现实问题」，配方写好后接上去 |
+
+> 这几项都是**加法**（新控件 / 新模块 / 新资产），不影响现有功能；E1/E2/E3 是独立小件，
+> E4/E5/E6 属于「工程化资产」，做之前最好先定「模板要不要管打包和单实例」这个取向。
 
 ### C. 功能补全（P1，建议优先做）
 

@@ -129,6 +129,13 @@ const TOOLBAR_MIN_H := 28.0     # 工具行最小高度
 const WINDOW_MIN_W := 1024.0
 const WINDOW_MIN_H := 640.0
 
+# 首次运行（还没有 user://config.cfg）时的窗口尺寸，单位是**逻辑**像素。
+# 注意 `project.godot` 的 `display/window/size/viewport_*` **不能**当这个用：
+# 它是物理像素、不随系统缩放走 —— 125% 缩放下 1280×800 会变成逻辑 1024×640，
+# 正好等于最小尺寸，窗口就在最小尺寸下打开（AppShell 会按缩放换算，见 `_apply_default_window_size`）。
+const WINDOW_DEFAULT_W := 1280.0
+const WINDOW_DEFAULT_H := 800.0
+
 # ---------- 界面缩放（AppShell / UiScaleOption） ----------
 # 可选缩放档位；0.0 这一档是「跟随系统 DPI」的哨兵值（见 app_shell.gd 的 detect_dpi_scale）。
 const UI_SCALE_FOLLOW_SYSTEM := 0.0

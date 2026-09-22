@@ -236,6 +236,15 @@ func _section_buttons() -> void:
 	lp.long_pressed.connect(func(): print("[gallery] 长按触发"))
 	row.add_child(lp)
 
+	# 长按按钮 + 语义变体：按住时的进度条颜色会跟着变体走（红底上用半透明白，
+	# 不然原来是写死的主色蓝、红底上几乎看不见）
+	var lp_danger := LongPressButton.new()
+	lp_danger.text = "长按急停（危险变体）"
+	lp_danger.hold_duration = 1.0
+	lp_danger.theme_type_variation = "DangerButton"
+	lp_danger.long_pressed.connect(func(): print("[gallery] 长按急停触发"))
+	row.add_child(lp_danger)
+
 	_section_box.add_child(_card("按钮类型", row))
 
 	# 语义化按钮：通过 theme_type_variation 复用统一样式
@@ -447,12 +456,23 @@ func _section_selection() -> void:
 	sw_label.text = "开关：关"
 	sw.toggled.connect(func(on: bool): sw_label.text = "开关：开" if on else "开关：关")
 
+	# 禁用态：置灰 + 不吃点击（Control 没有 disabled，Switch 是自绘的，所以自己补了一个）
+	var sw_off := Switch.new()
+	sw_off.button_pressed = true
+	sw_off.disabled = true
+	sw_off.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	var sw_off_label := Label.new()
+	sw_off_label.text = "禁用（置灰、点不动）"
+	sw_off_label.theme_type_variation = "Subtitle"
+
 	vb.add_child(cb)
 	vb.add_child(r1)
 	vb.add_child(r2)
 	vb.add_child(_sized(opt, 150))
 	vb.add_child(sw)
 	vb.add_child(sw_label)
+	vb.add_child(sw_off)
+	vb.add_child(sw_off_label)
 	_section_box.add_child(_card("复选 / 单选 / 下拉 / 开关（下拉固定宽度）", vb))
 
 
