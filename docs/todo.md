@@ -60,6 +60,10 @@
 | 13e | **验证用的截图脚本是临时的，已删** | —— | 自绘控件的布局问题**跑 headless 不报错也算不出来**，以后改 `TABLE_INDENT`/`TABLE_ARROW_W`/行高，建议照上面这套再截一次图 |
 | 23 | **表格行内按钮**（开始 / 暂停 / 删除） | ① 临时 headless 自检脚本 **17 条断言全过**：收起后按钮隐藏、展开后回来、按钮 y 跟着行序、同列左边界一致、点按钮回传正确的 uid/序号/action、`remove()` 后立刻不可见且下一帧回收、`clear_items()`/`clear_all_actions()` 全回收、换行数据后多余按钮回收、`get_action_button()` 取回并置灰；② 截图肉眼确认：DataTable 5 行各一组、TreeTable 里设备行 3 个按钮 / 通道行 2 个 / 叶子行没有、报警通道的「删除」是灰的 | 全过。**过程中修掉一个真问题**：回收按钮时只 `queue_free()` 会让它在帧末删除前**继续可见一帧**，补了 `hide()` |
 | 24 | 行高与按钮尺寸的匹配 | 临时脚本**实测**（不靠估）：普通按钮 48×32、`CellButton` 44×26；`TABLE_ROW_H` 由 26 提到 30 才塞得下 | 三个按钮一组宽约 140px，列宽要给够 |
+| 25 | **拖拽列宽时行内按钮不跟着走**（DeepScribe 报回来的 bug，确实是我写错的） | 先写复现检查（合成 `InputEventMouseButton`+`InputEventMouseMotion` 打进 `_gui_input()`，比较「分隔线位移」与「按钮 HBox 的全局 x 位移」）：**未修时按钮位移 0.0、分隔线 60.0**；修完两者都是 60.0 | 已修。根因：拖拽分支只 `queue_redraw()`、没重摆按钮；而 `_on_columns_changed()` 又**不含重绘**，所以两条路各缺一半 |
+| 26 | `_on_columns_changed()` 名不副实（同一份报告的第 2 条） | 同上 | 改成真正的统一入口：`update_minimum_size()` + `_on_widths_changed()`（后者 = 重摆按钮 + `queue_redraw()`）。拖拽走 `_on_widths_changed()`，**刻意不调 `update_minimum_size()`**（拖拽每秒上百个 motion 事件，行高又不会变） |
+| 27 | **新增常驻回归检查** `tools/checks/table_actions.gd` | 14 条断言，headless 一条命令跑完。**反向验证过**：把补丁退回去 → `[check] FAIL`、退出码 1、并打印「按钮没跟着列宽走（实际 0.0）」；补丁回来 → `PASS` / 0 | 这是模板里**第一个常驻检查**（此前都是临时脚本、跑完就删），C1 的雏形 |
+| 28 | 窗口标题去掉 ` (DEBUG)` 后缀（同一份报告的第 3 条） | 用**非 console** 的 Godot 起真窗口，PowerShell 读 OS 标题，三种写法各跑一遍 | 报告属实，我独立复现了：`Window.title` → `X (DEBUG)`；`DisplayServer.window_set_title` 写在首帧前 → `Godot4GUI (DEBUG)`（被引擎盖掉）；等一帧再调 → `X` ✅。已封装成 `AppShell.set_window_title()` |
 | 14 | **TreeTable 不泄漏内存** | 同一自检脚本发现「7 ObjectDB instances were leaked at exit」→ 改用 `Object` 显式所有权后重跑 | 泄漏归零。**踩到的坑**：`RefCounted` + 父子互引 = 引用环，引用计数永不回收；且 GDScript **不允许对象在自己的调用栈里 free 自己**（`Attempted to free a locked object`），故 `remove()` 把自己交给表去 `call_deferred("free")` |
 | 15 | **后端自动拉起（端到端）** | 清空端口占用 → 直接 `godot scenes/main.tscn -- --preset=fast --autostart` | 前端自动拉起 python（pid 记录在案）→ `hello_ack` 通过 → 97 列 / 1.5 s 跑完；**退出后端口释放、python 进程数归零**（`kill_on_exit` 生效） |
 | 16 | **脚手架项目也能自动拉起** | 生成新项目 → `--import` → 跑主场景 | `[app] 已连接后端。`，端口随后释放。**这条抓到一个真 bug**：骨架后端原来没有 `--log-file` 参数，argparse 会报 `unrecognized arguments` → 所有新生成项目的自动拉起都会失败（已修，并补上 `hello_ack`） |
@@ -127,6 +131,15 @@
 5. **等比显示时上下留白较大**：数据本身是 100 μm × 20 μm（5:1），工具条上的「等比」开关可关掉。
 6. **`docs/plotting-alternatives.md` 里的第三方 addon 链接会随时间失效**，属调研快照。
 7. 模板是「拷一份」而不是「依赖」：模板升级后已有新项目**不会**自动获得（见第 4 节）。
+8. **上游报告里有一条没能复现**（DeepScribe 报告第 4 条：设 `stretch_ratio` 会在退出时泄漏对象）。
+   实测**不支持**这个结论，所以没写进模板当事实：`Control` 上根本没有 `stretch_ratio` 这个属性
+   （正确的是 `size_flags_stretch_ratio`），报告里那段最小复现会直接报
+   `Invalid assignment of property or key 'stretch_ratio'`；用**正确属性名**重测（4 个实例、
+   有/无对照、再加 `SIZE_EXPAND_FILL` 对照）**都不泄漏**。
+   他们看到的多半是另一回事：**headless/收尾阶段的引擎噪声**（脚本中途报错、大帧数的 `--quit-after`
+   都会打出 `ObjectDB instances were leaked`）。判据已写进 CLAUDE.md：
+   **先跑一个什么都不建的空 `--script` 看基线**，别只把某一行注释掉就下结论 ——
+   那行本身写错的话脚本会提前中止，看着就像「去掉它就不漏了」。
 
 ---
 
@@ -155,6 +168,8 @@
 | **单元格按钮用真实 `Button` 节点**（推翻原来「表格不做内嵌控件」的说法） | 一开始是自绘的表格，所以顺口定了「不做内嵌控件」。真要做按行操作时，用真按钮能白拿四样东西：主题变体（红的删除、绿的开始）、禁用态、tooltip、以及**以后能换任意控件**（进度条/开关/状态灯）。代价是要管节点生命周期 —— 用「整数 uid 索引 + `_relayout_actions()` 统一摆放/隐藏/回收」压到可控 |
 | **按钮行用整数 uid，不用对象引用当字典键** | 行（`TreeTableItem`）是显式所有权、会被 `free()`；拿它当 Dictionary 的键，一旦行先被释放，后续「查一下这个键在不在」就是对已释放对象做哈希/比较 —— 而地址可能被新对象复用，会静默串行。uid 是自增 int，行没了就只是「这个键查不到」，安全 |
 | **`Cell*` 系列变体由 `_add_button_variation()` 连同普通版一起生成** | 普通按钮实测 32px 高、塞进 30px 的行里会顶到分隔线。与其把 `TABLE_ROW_H` 抬到 34（行会变胖、树也变高），不如给按钮做一套紧凑版：只差内边距，所以是同一个函数多传两个参数，不是复制一份样式代码 |
+| **「列宽变了」有两条路，各走一个函数** | `_on_columns_changed()` = 列数/行数变了 → 重算最小尺寸 + 重摆按钮 + 重绘；`_on_widths_changed()` = 只是列宽变了（拖拽中/控件 resize）→ 只重摆按钮 + 重绘。**拖拽刻意不走前者**：每秒上百个 motion 事件都让容器重算最小尺寸是白费（行高不会因为拖列宽而变）。这个拆分是被 DeepScribe 那个 bug 逼出来的 —— 原先两者混在一起，`_on_columns_changed()` 又漏了重绘，于是拖拽分支自己写 `queue_redraw()` 却忘了重摆按钮 |
+| **给模板加常驻回归检查（`tools/checks/`）** | 这次那个 bug 我自己的 17 条断言**没抓到** —— 因为它们只覆盖 `set_columns()`/`resized` 两条路，没盖拖拽。自绘控件的这类问题「跑场景不报错、断言写歪了也看不出来」，值得有个能一键跑的钉子。约定：`extends SceneTree` + `--script` 跑、失败用非零退出码、断言里写清「怎么算出来的」（见该文件头部注释） |
 
 ---
 
@@ -195,6 +210,10 @@ PY="C:\Users\YH\.conda\envs\normal\python.exe"
 # 再用 PIL 裁切+放大细看（放大倍数给大点，引导线/1px 边框这种问题要放大才看得见）
 #   python -c "from PIL import Image; ..."
 
+# ---- 常驻回归检查（改控件/表格后必跑，失败会返回非零退出码）----
+"$GODOT" --headless --path . --script res://tools/checks/table_actions.gd
+#   期望输出 [check] PASS、退出码 0
+
 # ---- 起新项目 ----
 "$PY" tools/new_project.py D:/work/MyLab --title "XX 实验台"
 
@@ -216,3 +235,5 @@ taskkill /F /PID <pid>
    （**新项目的自动拉起也要确认**：主场景日志里出现「已连接后端」才算过）；
 6. **改了任何自绘控件 / 布局**：按「自绘控件的目视验收」截一张图放大看 ——
    headless 不报错不代表画对了（表格被裁、树线悬空这类问题它一声不响）。
+7. **改了表格（列宽/行结构/行内按钮）**：跑 `tools/checks/table_actions.gd`，要看到 `[check] PASS`。
+   它在**未修 bug 时会真的失败**（反向验证过：退出码 1 + 打印实际位移），不是走过场。

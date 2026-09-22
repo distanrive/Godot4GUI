@@ -77,7 +77,9 @@ python tools/new_project.py <目标目录> [--name 工程名] [--title 界面标
 **原样复制**：`scripts/autoload/`、`scripts/theme/`、`scripts/ui/`、`scripts/util/`、
 `themes/`（图标 + 着色器）、`project.godot`（改名后，`[backend] python=` 会改写成本机跑脚手架的那个解释器）、
 `backend/requirements.txt`、`scenes/gallery.tscn` + `scripts/gallery.gd`、
-`docs/gdscript-only-guide.md`（不需要后端时看这篇）；`.claude/skills/`（可选，Claude Code 的开发规范）。
+`docs/gdscript-only-guide.md`（不需要后端时看这篇）、
+`tools/checks/table_actions.gd`（表格行内按钮的回归检查，改表格后跑一下）；
+`.claude/skills/`（可选，Claude Code 的开发规范）。
 
 **替换成本项目的骨架**：
 

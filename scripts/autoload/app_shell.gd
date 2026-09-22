@@ -105,6 +105,24 @@ func save_config() -> void:
 	_flush_now()
 
 
+## 设置窗口标题。**要改标题就用这个函数**，别直接写 `Window.title`，也别自己调 DisplayServer。
+##
+## 这里面的两步都是必需的（2026-09-22 在 Godot 4.7.2 / Windows 上实测过三种写法）：
+##
+## | 写法 | OS 上的标题实际变成 |
+## |---|---|
+## | `get_window().title = "X"` | `X (DEBUG)` —— 调试版下引擎会把后缀加回来 |
+## | `DisplayServer.window_set_title("X")` 直接写在 `_ready()` 里 | `项目名 (DEBUG)` —— 被引擎的默认标题盖掉 |
+## | 本函数（等一帧 + `DisplayServer`） | `X` ✅ |
+##
+## 「等一帧」不能省：引擎是在**窗口首帧显示时**才写那一次默认标题的，晚于 `_ready()`。
+##
+## 正式导出（Release）本来就没有 ` (DEBUG)` 后缀，所以这纯粹是开发期观感问题。
+func set_window_title(text: String) -> void:
+	await get_tree().process_frame
+	DisplayServer.window_set_title(text)
+
+
 ## 系统/屏幕的缩放系数。
 ##
 ## 顺序：`screen_get_scale()` 优先（macOS/Wayland/移动端上是准的），

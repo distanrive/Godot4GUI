@@ -148,6 +148,13 @@
   **引用环**，而 GDScript 用引用计数（非追踪 GC），环上的对象永远不回收。
 - **GDScript 不允许对象在「自己的调用栈里」释放自己**（会报 `Attempted to free a locked object`）。
   自删逻辑要交给外部持有者，必要时 `call_deferred("free")` 推迟到空闲时。
+- **窗口标题用 `AppShell.set_window_title()`**，别写 `get_window().title`：调试版下 `Window.title`
+  会被引擎加上 ` (DEBUG)` 后缀，而 `DisplayServer.window_set_title()` 写在 `_ready()` 里又会被
+  引擎的默认标题盖掉 —— 必须「等一帧 + 用 DisplayServer」两步都对。导出后本来就没这后缀。
+- **headless / 退出时报的「泄漏」未必是你的代码漏的**（`ObjectDB instances were leaked`、
+  `RID allocations leaked`、`BUG: Unreferenced static string` 常常是引擎收尾噪声）。
+  判据是**做对照**：跑一个什么都不建的**空** `--script` 看基线干不干净。
+  别只把某一行注释掉就断定是它 —— 那行本身写错的话脚本会提前中止，看着就像「去掉它就好了」。
 - `IntensityMap.setup()` / `clear()` 会把 `auto_range` 一并复位（内部 `_reset_range()`）：
   只清 `display_range` 而留着 `auto_range = false`，`vmax` 会落到 `1e-30` → **整幅图全黑**。
   要冻结量程用 `auto_range = false`，别去动 `display_range`。

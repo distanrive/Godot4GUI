@@ -172,11 +172,35 @@ Godot4GUI/
 - `Tree` 不支持拖拽调列宽（只有 `get_column_width()` 只读），要可调列宽的数据表用本项目 `DataTable`。
 - 闪烁/报警用 `FlashLabel`：先把文字设成报警色，再对 `modulate.a` 做透明度闪烁；不要用 `modulate` 改颜色（会把深色文字越乘越暗）。
 - 页面边距由 `MarginContainer` 的主题默认值控制，改 `theme_palette.gd` 的 `PAGE_MARGIN` 一处即可统一调整。
+- **窗口标题要用 `AppShell.set_window_title()`**，别直接写 `get_window().title`。
+  开发期用编辑器那套二进制跑工程时，标题会带个 ` (DEBUG)` 后缀，看着像没编译完；要去掉它必须两步都对
+  （2026-09-22 在 Godot 4.7.2 / Windows 上实测）：
+
+  | 写法 | OS 上的标题实际变成 |
+  |---|---|
+  | `get_window().title = "X"` | `X (DEBUG)` ← `Window.title` 的 setter 会让引擎把后缀加回来 |
+  | `DisplayServer.window_set_title("X")` 直接写在 `_ready()` 里 | `项目名 (DEBUG)` ← 被引擎的默认标题盖掉 |
+  | `AppShell.set_window_title("X")`（等一帧 + `DisplayServer`） | `X` ✅ |
+
+  「等一帧」不能省：引擎是在**窗口首帧显示时**才写那一次默认标题的，晚于 `_ready()`。
+  正式导出（Export → Release）本来就没有这个后缀，所以这纯粹是开发期观感问题。
+- **headless / 退出时报的「泄漏」未必是你的代码漏了**：`ObjectDB instances were leaked at exit`、
+  `RID allocations of type ... leaked at exit`、`BUG: Unreferenced static string` 这些在收尾阶段
+  经常是**引擎自身的噪声**（场景/脚本中途报错、`--quit-after` 到大帧数时都出现过）。
+  判据是**做对照**：写个什么都不建的**空** `--script` 跑一遍，基线干净了再去怀疑自己的代码。
+  **不要只把某一行注释掉就断定是它** —— 那行如果本身是错的（属性名写错之类）脚本会提前中止，
+  看起来就像「去掉它就不泄漏」。（上游 DeepScribe 报回来的 `stretch_ratio` 泄漏就是这么来的：
+  `Control` 上根本没有 `stretch_ratio` 这个属性，正确的是 `size_flags_stretch_ratio`；
+  我用正确属性名实测 **4 个实例、有/无对照都不泄漏**，所以这条没法写进模板当结论。）
 - `Window` 的 `embedded_border`（内嵌对话框的标题栏）**可以**覆盖，但要保留引擎默认的边距：`content_margin_top = 28`（标题栏高度）、`expand_margin_* = 32`（投影留白），只换颜色。边距给小了标题文字会被裁掉 —— 这才是「覆盖后标题栏消失」的真正原因（见 `theme_factory.gd` 的 `embed`）。改成浅色标题栏后必须同时换 `close`/`close_pressed` 图标：引擎默认是白叉，浅底上看不见（已换成 `themes/icons/close*.svg`）。
 - **canvas_item 着色器里 `COLOR` 已经乘过纹理采样**：写 `COLOR = vec4(c, 1.0);` 即可，再乘一次 `COLOR` 会把整幅图压暗。
 - 浮点纹理（`FORMAT_RF`）用 `TEXTURE_FILTER_NEAREST`：逐格显示更像 `pcolormesh`，也避开老 GPU 缺 `OES_texture_float_linear` 的问题。
 - **主题只在「Control 的父链全是 Control/Window」时才生效**：中间夹一个普通 `Node`，其下的控件就拿不到主题（`get_theme_constant` 会返回引擎默认值）。写测试脚本包场景时尤其容易踩。
 - 拖放/文件对话框：`FileDialog.file_mode` 默认是 `FILE_MODE_SAVE_FILE`，取文件必须显式设成 `FILE_MODE_OPEN_FILE`。
+- **GDScript 的 lambda 按值捕获局部变量**：在 `connect(func(...): ...)` 里给外层的**局部**变量赋值，
+  只改到 lambda 自己那份副本，外面看到的还是原值（写信号回调测试时踩过：`var got := []; ...connect(func(...): got = [...]);`
+  结果 `got` 永远是空的）。两种正确写法：把结果放到**成员变量**里（`_clicked = [...]`，走 `self` 能写回去），
+  或者对捕获到的 `Array`/`Dictionary` 做**原地修改**（`got.append(x)` —— 引用类型，拷贝的是引用）。
 - **`IntensityMap.setup()` / `clear()` 会把 `auto_range` 一并复位成 `true`**（内部走 `_reset_range()`），并发出 `range_reset` 信号。
   这不是随手写的：只清 `display_range` 而留着 `auto_range = false`，`vmax` 会落到 `1e-30`，**整幅图全黑**。
   界面上有「自动量程」开关之后这条路径用户能主动走到，所以两件事必须绑在一起做。要冻结量程用 `auto_range = false`，别去动 `display_range`。

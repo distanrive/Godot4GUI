@@ -42,6 +42,9 @@ COPY_FILES = [
     "project.godot",
     "backend/requirements.txt",
     "docs/gdscript-only-guide.md",
+    # 控件库跟着项目走，那它的回归检查也一起走：
+    #   godot --headless --path . --script res://tools/checks/table_actions.gd
+    "tools/checks/table_actions.gd",
 ]
 # gallery（开发期参照手册）：--no-gallery 时不拷
 GALLERY_FILES = [

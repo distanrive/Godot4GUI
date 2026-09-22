@@ -128,16 +128,28 @@ func _get_minimum_size() -> Vector2:
 	return Vector2(0.0, get_required_height())
 
 
-## 列数 / 列宽 / 行数变化后的统一入口：让容器重新问一次最小尺寸，并把单元格按钮重新摆好。
-## 子类可覆写做更多事（记得调 super）。
+## 列数 / 列宽 / 行数变化后的统一入口：**重算最小尺寸、重摆单元格按钮、重绘**，三件一起做。
+##
+## 调用方**不要**再去补其中任何一件 —— 漏掉一件就是一个 bug。这里原来少了 `queue_redraw()`，
+## 于是「拖拽列宽」那条路自己写了 `queue_redraw()` 却没重摆按钮，结果拖动分隔线时
+## 表头跟着走、行内按钮钉在原地不动（DeepScribe 报回来的就是这个）。
 func _on_columns_changed() -> void:
 	update_minimum_size()
+	_on_widths_changed()
+
+
+## 只是列宽变了（拖拽过程中，或控件被 resize）：按钮的 x 与画面都要更新。
+##
+## 刻意**不调 `update_minimum_size()`**：拖拽时每秒会来上百个 motion 事件，
+## 每次都让容器重算一遍最小尺寸纯属白费（行高不会因为拖列宽而变）。
+## 「列宽也可能影响最小尺寸」的那种场景走 `_on_columns_changed()`。
+func _on_widths_changed() -> void:
 	_relayout_actions()
+	queue_redraw()
 
 
 func _on_resized() -> void:
-	queue_redraw()
-	_relayout_actions()          # 列宽跟着窗口变，按钮的 x 要跟着走
+	_on_widths_changed()         # 窗口尺寸变了 ⇒ 最后一列宽度跟着变 ⇒ 按钮的 x 要跟着走
 
 
 # ---------------------------------------------------------------- 单元格按钮
@@ -311,7 +323,9 @@ func _gui_input(event: InputEvent) -> void:
 		var lo := ThemePalette.TABLE_MIN_COL
 		var hi := maxf(size.x - other - ThemePalette.TABLE_MIN_COL, lo)
 		_widths[_drag_col] = clampf(_drag_start_w + (event.position.x - _drag_start_x), lo, hi)
-		queue_redraw()
+		# 列宽变了 ⇒ 按钮该在的位置也变了（最后一列的宽度是「剩余宽度」，所以拖任何一条
+		# 分隔线都会挪到它），所以这里不能只 queue_redraw()。
+		_on_widths_changed()
 		accept_event()
 	else:
 		_on_body_input(event)
