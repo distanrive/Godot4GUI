@@ -73,20 +73,11 @@ func _draw() -> void:
 
 	# 表体底色
 	draw_rect(Rect2(0, header_h, size.x, size.y - header_h), cell_bg, true)
-	# 表头底色
-	draw_rect(Rect2(0, 0, size.x, header_h), header_bg, true)
 
-	# 列分隔线（贯穿整表）+ 表头文字
-	for i in range(_titles.size()):
-		var w := _col_w(i)
-		var sx := _sep_x(i)
-		draw_line(Vector2(sx, 0), Vector2(sx, size.y), grid, 1.0)
-		draw_string(font, Vector2(sx - w + pad, header_h / 2.0 + fs * 0.35), _titles[i],
-				HORIZONTAL_ALIGNMENT_LEFT, w - pad * 2.0, fs, header_text)
-
-	# 表体行
-	var y := header_h
-	for r in _rows.size():
+	# 表体行：只画可见区间，并按滚动偏移整体上移
+	var span := _visible_row_range(row_h, _rows.size())
+	var y := header_h - _scroll + float(span.x) * row_h
+	for r in range(span.x, span.y):
 		draw_line(Vector2(0, y), Vector2(size.x, y), grid, 1.0)
 		var row: Array = _rows[r]
 		var cx := 0.0
@@ -97,5 +88,17 @@ func _draw() -> void:
 			cx += _col_w(c)
 		y += row_h
 
-	# 底边线
-	draw_line(Vector2(0, y), Vector2(size.x, y), grid, 1.0)
+	# 底边线（滚到中间时贴在表体下沿，滚到底时就是原来的位置）
+	draw_line(Vector2(0, minf(y, size.y)), Vector2(size.x, minf(y, size.y)), grid, 1.0)
+
+	# 表头**最后画**：它会盖住表体往上滚时压进表头带里的那半行 ——
+	# 这样一来就不需要在自绘里做矩形裁剪（裁剪矩形是整个控件，盖不住表头带）。
+	# 没滚动时 `_scroll == 0`，没有任何行会落进表头带，输出与从前完全一致。
+	draw_rect(Rect2(0, 0, size.x, header_h), header_bg, true)
+	for i in range(_titles.size()):
+		var w := _col_w(i)
+		var sx := _sep_x(i)
+		draw_line(Vector2(sx, 0), Vector2(sx, size.y), grid, 1.0)
+		draw_string(font, Vector2(sx - w + pad, header_h / 2.0 + fs * 0.35), _titles[i],
+				HORIZONTAL_ALIGNMENT_LEFT, w - pad * 2.0, fs, header_text)
+	draw_line(Vector2(0, header_h), Vector2(size.x, header_h), grid, 1.0)

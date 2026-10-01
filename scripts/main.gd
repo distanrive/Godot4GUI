@@ -17,7 +17,7 @@ var _map: IntensityMap
 var _progress: ProgressBar
 var _status: Label
 var _running_label: FlashLabel
-var _log_label: Label
+var _log_view: LogView
 var _count_label: Label
 var _hover_label: Label
 var _step_hint: Label
@@ -79,9 +79,22 @@ func _build_ui() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(margin)
 
+	# 页面级滚动：窗口被拖得比内容还小时，出现滚动条，而不是把右下角直接切掉。
+	# 拉伸模式是 `disabled`（见 project.godot 的说明），所以「窗口变小 = 显示更少内容」，
+	# 兜底就靠这一层 —— 否则最小尺寸以下的布局无可救药。
+	var page := ScrollContainer.new()
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(page)
+
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 12)
-	margin.add_child(root)
+	# **两个方向都要 EXPAND_FILL**：ScrollContainer 只在子节点允许扩展时，才会在
+	# 「内容比视口小」的情况下把它撑满 —— 缺了这一条，窗口一大，内容就只占顶部一小块、
+	# 下面留一大片空白（横向同理：铺满宽度，宽度不够时由外层出横向滚动条）。
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	page.add_child(root)
 	root.add_child(_build_header())
 
 	var body := HBoxContainer.new()
@@ -242,11 +255,12 @@ func _build_stage() -> Control:
 	bottom.add_child(_count_label)
 	vb.add_child(bottom)
 
-	_log_label = Label.new()
-	_log_label.text = "就绪。左侧填参数或拖入参数文件，然后点「开始计算」。"
-	_log_label.theme_type_variation = "LogLabel"
-	_log_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vb.add_child(_log_label)
+	# 日志区：可滚动、可回看、可复制。原来这里是一个 Label（只显示最后一条），
+	# 长流程跑起来以后前面发生过什么就全丢了。
+	_log_view = LogView.new()
+	_log_view.custom_minimum_size = Vector2(0, ThemePalette.LOG_MIN_H)
+	vb.add_child(_log_view)
+	_log("就绪。左侧填参数或拖入参数文件，然后点「开始计算」。")
 	return vb
 
 
@@ -362,7 +376,7 @@ func _make_button(text: String, variation: String, handler: Callable) -> Button:
 func _num(field: LabeledLineEdit, fallback: float) -> float:
 	var text := field.text.strip_edges()
 	if not text.is_valid_float():
-		_log("「%s」不是数字（%s），沿用上一次的值 %s" % [field.label_text, text, Fmt.num(fallback, 6)])
+		_log("「%s」不是数字（%s），沿用上一次的值 %s" % [field.label_text, text, Fmt.num(fallback, 6)], "warn")
 		field.text = Fmt.num(fallback, 6)
 		return fallback
 	return text.to_float()
@@ -525,9 +539,10 @@ func _variation_for_level(level: String) -> String:
 			return "StatusIdle"
 
 
-func _log(msg: String) -> void:
-	if _log_label != null:
-		_log_label.text = msg
+## 写一行日志。`level` 走 LogView 的级别配色（info / ok / warn / error / system）。
+func _log(msg: String, level := "info") -> void:
+	if _log_view != null:
+		_log_view.append(msg, level)
 	print("[diffraction] " + msg)
 
 
@@ -547,7 +562,7 @@ func _update_count_label() -> void:
 func _on_connected() -> void:
 	_set_status("已连接后端", "ok")
 	NetClient.send_json({"type": "hello"})
-	_log("已连接后端，可以开始计算。")
+	_log("已连接后端，可以开始计算。", "ok")
 	if _autostart:
 		_autostart = false
 		_on_start_pressed()
@@ -557,7 +572,7 @@ func _on_disconnected() -> void:
 	_set_status("未连接后端", "error")
 	_running = false
 	_update_buttons()
-	_log("与后端断开连接（后端已退出？见「后端启动失败」提示）。")
+	_log("与后端断开连接（后端已退出？见「后端启动失败」提示）。", "warn")
 
 
 ## 后端进程状态（由 BackendLauncher 发来）：已连上 / 正在拉起 / 起不来。
@@ -565,12 +580,12 @@ func _on_backend_status(text: String, level: String) -> void:
 	_set_status(text, level)
 	_backend_button.visible = (level == "error")
 	if level == "error":
-		_log(text)
+		_log(text, "error")
 
 
 func _on_backend_failed(reason: String) -> void:
 	_log("后端没起来：%s\n  可以点标题栏的「启动后端」重试，或在 project.godot 的 [backend] 段"
-			% reason)
+			% reason, "error")
 
 
 func _on_data(payload: Variant) -> void:
@@ -590,7 +605,7 @@ func _on_data(payload: Variant) -> void:
 			_running = false
 			_update_buttons()
 			_update_count_label()
-			_log("后端报错：%s" % _last_error)
+			_log("后端报错：%s" % _last_error, "error")
 		"progress":
 			_progress.value = float(payload.get("value", 0.0))
 		"hello_ack":
@@ -634,7 +649,7 @@ func _on_params(payload: Dictionary) -> void:
 	if bool(payload.get("ok", false)):
 		_apply_params(payload.get("params", {}))
 	else:
-		_log("读取参数文件失败：%s" % str(payload.get("message", "")))
+		_log("读取参数文件失败：%s" % str(payload.get("message", "")), "error")
 
 
 func _on_done(payload: Dictionary) -> void:
@@ -646,13 +661,15 @@ func _on_done(payload: Dictionary) -> void:
 	if bool(payload.get("error", false)) or not _last_error.is_empty():
 		# 出错时后端也会发 rs_done（前端要靠它收尾），但那不是「算完了」——
 		# 别让这条消息把 rs_error 的报错覆盖成一句「计算完成」。
-		_log("计算已中断（出错）：已算 %d / %d 个距离。%s" % [columns, _total_columns, _last_error])
+		_log("计算已中断（出错）：已算 %d / %d 个距离。%s" % [columns, _total_columns, _last_error],
+				"error")
 		return
 	if bool(payload.get("cancelled", false)):
-		_log("已中止：算了 %d / %d 个距离，用时 %.1f s。" % [columns, _total_columns, elapsed])
+		_log("已中止：算了 %d / %d 个距离，用时 %.1f s。" % [columns, _total_columns, elapsed],
+				"warn")
 	else:
 		_progress.value = 100.0
-		_log("计算完成：%d 个距离，用时 %.1f s。" % [columns, elapsed])
+		_log("计算完成：%d 个距离，用时 %.1f s。" % [columns, elapsed], "ok")
 
 
 func _on_cell_hovered(z: float, y: float, value: float) -> void:

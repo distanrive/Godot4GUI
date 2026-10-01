@@ -196,12 +196,23 @@ static func _styleboxes(t: Theme) -> void:
 	t.set_stylebox("title_button_pressed", "Tree", _sb(ThemePalette.ACCENT_SOFT_HOVER, ThemePalette.ACCENT,
 			ThemePalette.RADIUS_SM, 1, ThemePalette.PAD_INPUT_H, 4.0))
 
-	# 滚动条：轨道 + 滑块（ScrollBar 的 grabber 是 StyleBox，非图标）
-	t.set_stylebox("scroll", "ScrollBar", _sb(ThemePalette.SURFACE_ALT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0))
-	t.set_stylebox("scroll_focus", "ScrollBar", _sb(ThemePalette.SURFACE_ALT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0))
-	t.set_stylebox("grabber", "ScrollBar", _sb(ThemePalette.BORDER_STRONG, _TRANSPARENT, ThemePalette.RADIUS_SM, 0))
-	t.set_stylebox("grabber_highlight", "ScrollBar", _sb(Color(0.62, 0.66, 0.71), _TRANSPARENT, ThemePalette.RADIUS_SM, 0))
-	t.set_stylebox("grabber_pressed", "ScrollBar", _sb(ThemePalette.ACCENT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0))
+	# 滚动条：轨道 + 滑块（ScrollBar 的 grabber 是 StyleBox，非图标）。
+	#
+	# **必须给 content_margin**：滚动条的粗细就是样式盒的最小尺寸（= 左右 margin 之和），
+	# 给 0 的话 `VScrollBar.get_combined_minimum_size()` 实测是 `(0, 0)` ——
+	# 轨道与滑块都画不出来，整个界面的滚动条都成了抓不住的细痕（本次修的就是这个）。
+	# 见 ThemePalette.SCROLLBAR_W 的注释。
+	var sb_pad := ThemePalette.SCROLLBAR_W * 0.5
+	t.set_stylebox("scroll", "ScrollBar",
+			_sb(ThemePalette.SURFACE_ALT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, sb_pad, sb_pad))
+	t.set_stylebox("scroll_focus", "ScrollBar",
+			_sb(ThemePalette.SURFACE_ALT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, sb_pad, sb_pad))
+	t.set_stylebox("grabber", "ScrollBar",
+			_sb(ThemePalette.BORDER_STRONG, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, sb_pad, sb_pad))
+	t.set_stylebox("grabber_highlight", "ScrollBar",
+			_sb(Color(0.62, 0.66, 0.71), _TRANSPARENT, ThemePalette.RADIUS_SM, 0, sb_pad, sb_pad))
+	t.set_stylebox("grabber_pressed", "ScrollBar",
+			_sb(ThemePalette.ACCENT, _TRANSPARENT, ThemePalette.RADIUS_SM, 0, sb_pad, sb_pad))
 
 	# 滑块：轨道（明显灰色，四周留白使杆变细）+ 可交互区
 	t.set_stylebox("slider", "Slider", _sb(Color(0.64, 0.68, 0.73), _TRANSPARENT, ThemePalette.RADIUS_SM, 0, 6.0, 6.0))
@@ -263,6 +274,13 @@ static func _icons(t: Theme) -> void:
 
 	t.set_icon("arrow", "Tree", arrow_down)
 	t.set_icon("arrow_collapsed", "Tree", arrow_right)
+
+	# 滚动条两端的箭头按钮：自定义主题没定义的项会回落到**引擎默认主题**，
+	# 而默认主题的滚动条两端是有箭头的，跟这套浅色样式不搭。
+	# 压成全透明的 empty.svg（尺寸仍是 8×8，所以「点两端步进」这个交互还在，只是看不见）。
+	for dir in ["increment", "decrement"]:
+		for state in ["", "_highlight", "_pressed"]:
+			t.set_icon(dir + state, "ScrollBar", empty)
 
 	# 树状表格的展开箭头（自绘控件不认 Tree 的图标，得在自己的类型名下再注册一次）
 	t.set_icon("arrow_expanded", "TreeTable", arrow_down)
@@ -366,6 +384,15 @@ static func _custom_types(t: Theme) -> void:
 	t.set_font_size("tick_font_size", "IntensityMap", ThemePalette.FONT_XS)
 	t.set_font_size("label_font_size", "IntensityMap", ThemePalette.FONT_SM)
 	t.set_font_size("title_font_size", "IntensityMap", ThemePalette.FONT_MD)
+
+	# 滚动日志（LogView）：级别配色沿用状态色的语义令牌，不另起一套颜色
+	t.set_color("info_color", "LogView", ThemePalette.TEXT_SEC)
+	t.set_color("ok_color", "LogView", ThemePalette.SUCCESS)
+	t.set_color("warn_color", "LogView", ThemePalette.WARNING)
+	t.set_color("error_color", "LogView", ThemePalette.DANGER)
+	t.set_color("system_color", "LogView", ThemePalette.ACCENT)
+	t.set_color("time_color", "LogView", ThemePalette.TEXT_DIS)
+	t.set_color("source_color", "LogView", ThemePalette.ACCENT)
 
 	# 文件拖放框（FileDropBox）
 	t.set_color("bg_color", "FileDropBox", ThemePalette.SURFACE)

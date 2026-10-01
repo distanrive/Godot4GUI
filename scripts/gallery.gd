@@ -47,11 +47,18 @@ func _build() -> void:
 	var root := HBoxContainer.new()
 	margin.add_child(root)
 
-	# 左侧导航（宽度要放得下底部的「界面缩放」下拉，否则选项文字会被截断）
+	# 左侧导航（宽度要放得下底部的「界面缩放」下拉，否则选项文字会被截断）。
+	# 外面套滚动区：窗口拖矮时导航能滚，不会把底部的「界面缩放」顶出屏幕。
+	var nav_scroll := ScrollContainer.new()
+	nav_scroll.custom_minimum_size = Vector2(180, 0)
+	nav_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	nav_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	root.add_child(nav_scroll)
+
 	var nav := VBoxContainer.new()
-	nav.custom_minimum_size = Vector2(180, 0)
+	nav.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nav.add_theme_constant_override("separation", 4)
-	root.add_child(nav)
+	nav_scroll.add_child(nav)
 
 	var nav_title := Label.new()
 	nav_title.text = "控件分类"
@@ -65,6 +72,7 @@ func _build() -> void:
 		["选择", "selection"],
 		["滑块与进度", "sliders"],
 		["容器与布局", "containers"],
+		["滚动与日志", "scrolling"],
 		["表格与列表", "tables"],
 		["图表", "chart"],
 		["弹窗与菜单", "dialogs"],
@@ -118,6 +126,7 @@ func _show_section(id: String) -> void:
 			"selection": _section_selection()
 			"sliders": _section_sliders()
 			"containers": _section_containers()
+			"scrolling": _section_scrolling()
 			"tables": _section_tables()
 			"chart": _section_chart()
 			"dialogs": _section_dialogs()
@@ -277,9 +286,9 @@ func _section_buttons() -> void:
 		+ " AccentButton = 一屏一个的主操作（开始/保存）；"
 		+ " DangerButton = 有破坏性或安全相关的操作（急停/删除）；"
 		+ " SuccessButton = 确认执行；"
-		+ " GhostButton = **次要操作**（回读参数、打开日志目录这类）；"
+		+ " GhostButton = 次要操作（回读参数、打开日志目录这类）；"
 		+ " CapsuleButton = 标签式筛选/快捷选项，不是「执行」而是「选择」。"
-		+ "\n「幽灵」指的是**没有底色和边框、只有文字**，悬停时才浮出一层浅底 —— "
+		+ "\n「幽灵」指的是没有底色和边框、只有文字，悬停时才浮出一层浅底 —— "
 		+ "所以它不跟主操作抢视觉焦点，适合放在卡片和工具栏里。它不是权限、也不是状态。"))
 
 	# 胶囊按钮：全圆角 + 描边（类型变体 CapsuleButton）
@@ -648,6 +657,84 @@ func _section_containers() -> void:
 	_section_box.add_child(_card("RowCard（行卡片，PanelContainer + HBox）", rowcard))
 
 
+func _section_scrolling() -> void:
+	_section_box.add_child(_header("滚动与日志 Scroll / Log"))
+	_section_box.add_child(_caption(
+		"滚动条的粗细由主题样式盒的最小尺寸决定（ThemePalette.SCROLLBAR_W）。"
+		+ "曾经的坑：样式盒 content_margin 给 0，实测 VScrollBar 最小尺寸就是 (0, 0) —— "
+		+ "轨道和滑块都画不出来，整个界面的滚动条都是抓不住的细痕。"
+		+ " 改这些值之前先跑 tools/checks/scroll_bars.gd。"))
+
+	# ---- LogView：可回看、可复制、有行数上限的日志区 ----
+	var log := LogView.new()
+	log.custom_minimum_size = Vector2(0, 200)
+	log.append("设备已连接（来源标签是第三个参数）", "ok", "温控台 A")
+	log.append("通道 2 温度 41.8 ℃ 超限", "warn", "通道 2")
+	log.append("读取参数文件失败：FileNotFoundError", "error")
+	log.append("路径里带方括号也不会被当成 BBCode 解析：[D:/data/run[3]/out.txt]")
+	log.append("这是一条普通信息")
+
+	var log_counter := [0]
+	var log_row := HBoxContainer.new()
+	log_row.add_theme_constant_override("separation", 8)
+	var count_label := Label.new()
+	count_label.theme_type_variation = "PathLabel"
+	count_label.text = "line_count() → 5"
+
+	var add_one := Button.new()
+	add_one.text = "加一行"
+	add_one.theme_type_variation = "CapsuleButton"
+	add_one.pressed.connect(func():
+		log_counter[0] += 1
+		log.append("第 %d 条测试日志（时间戳自带的）" % log_counter[0])
+		count_label.text = "line_count() → %d" % log.line_count())
+	var add_many := Button.new()
+	add_many.text = "加 500 行"
+	add_many.theme_type_variation = "CapsuleButton"
+	add_many.pressed.connect(func():
+		for i in 500:
+			log_counter[0] += 1
+			log.append("批量日志 #%d" % log_counter[0], "info", "批量")
+		count_label.text = "line_count() → %d（超过 max_lines 后裁掉最旧的）" % log.line_count())
+	var clear_log := Button.new()
+	clear_log.text = "清空"
+	clear_log.theme_type_variation = "GhostButton"
+	clear_log.pressed.connect(func():
+		log.clear()
+		count_label.text = "line_count() → 0")
+	log_row.add_child(add_one)
+	log_row.add_child(add_many)
+	log_row.add_child(clear_log)
+	log_row.add_child(count_label)
+
+	var log_box := VBoxContainer.new()
+	log_box.add_theme_constant_override("separation", 8)
+	log_box.add_child(log)
+	log_box.add_child(log_row)
+	_section_box.add_child(_card("LogView（滚动日志：级别配色 / 时间戳 / 来源 / 行数上限 / 可选中复制）", log_box))
+	_section_box.add_child(_caption(
+		"日志文本会自动转义 BBCode 方括号，随便丢什么数据进去都不会被当成标记。"
+		+ " 自动跟随是「贴底才跟」：往上翻看历史时新日志不会把你拽回底部。"
+		+ " max_lines 超出后成块裁掉最旧的（默认 2000 行），长时间跑不会把内存吃满。"))
+
+	# ---- 裸 ScrollContainer：长内容自动出滚动条 ----
+	var sc := ScrollContainer.new()
+	sc.custom_minimum_size = Vector2(0, 150)
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	var inner := VBoxContainer.new()
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc.add_child(inner)
+	for i in range(20):
+		var l := Label.new()
+		l.text = "可滚动内容第 %d 行" % (i + 1)
+		inner.add_child(l)
+	_section_box.add_child(_card("ScrollContainer（内容超出高度时自动出滚动条）", sc))
+	_section_box.add_child(_caption(
+		"表格要滚动不要这样套 —— 那会把表头一起滚走。用 DataTable/TreeTable 自己的"
+		+ " set_max_visible_rows() / set_max_height()，表头会钉住不动。"))
+
+
 func _section_tables() -> void:
 	_section_box.add_child(_header("表格与列表 Table / List"))
 
@@ -709,7 +796,7 @@ func _section_tables() -> void:
 	_section_box.add_child(_caption(
 		"DataTable 为自绘数据表：拖动表头分隔线调列宽，最后一列自动填满剩余宽度；"
 		+ "Godot 的 Tree 做不到这一点。高度按行数自动上报，调用方只管宽度。"
-		+ " 末列的「开始/暂停/删除」是 `set_row_actions()` 放进去的**真实 Button**，"
+		+ " 末列的「开始/暂停/删除」是 `set_row_actions()` 放进去的真实 Button，"
 		+ "所以主题变体（CellSuccessButton 等）与禁用态都照常生效。"))
 
 	_add_tree_table_section()
@@ -815,29 +902,25 @@ func _add_tree_table_section() -> void:
 	buttons.add_child(collapse)
 	buttons.add_child(drop)
 
-	# 放在 ScrollContainer 里：TreeTable 会把自己的最小高度同步成「表头 + 可见行数 × 行高」，
-	# 所以行数超出这个框时由外层滚动，不需要控件内部再做滚动。
-	var scroll := ScrollContainer.new()
-	# 给够高度，让展开到第三层（12 行 × 30px 行高 + 表头）时整棵树都看得见，不用滚
-	scroll.custom_minimum_size = Vector2(0, 400)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.add_child(tree)
+	# 用控件**内建**的滚动：最多显示 8 行，再多就自己出滚动条，**表头钉住不动**。
+	# （套外层 ScrollContainer 也能滚，但表头会跟着滚走，那是错的。）
+	tree.set_max_visible_rows(8)
 	tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 8)
-	box.add_child(scroll)
+	box.add_child(tree)
 	box.add_child(buttons)
 	box.add_child(readout)
 	_section_box.add_child(_card("TreeTable（树状表格：层级 + 可拖拽调列宽 + 行内按钮）", box))
 	_section_box.add_child(_caption(
 		"TreeTable 解决 Godot 原生 Tree 的两个短板：列宽不能拖（get_column_width 只读）"
 		+ "、样式不走本项目主题。层级用 create_item(parent) 建，点箭头展开/收起，"
-		+ "双击一行发 item_activated。要滚动就把它放进 ScrollContainer —— 控件会自己算最小高度。"
+		+ "双击一行发 item_activated。这张树用了 set_max_visible_rows(8)：超过 8 行就自己出滚动条，"
+		+ "表头钉在顶上不动（套 ScrollContainer 会把表头一起滚走，别那么用）。"
 		+ "\n末列的按钮用 `set_item_actions(item, 列号, 规格数组)` 配：设备行是「开始/暂停/删除」，"
-		+ "通道行只有「暂停/删除」（通道 2 在报警，它的「删除」是**禁用**的），"
-		+ "叶子测量项**没有**按钮 —— 行内按钮是按行配的、不必每行都有。"
+		+ "通道行只有「暂停/删除」（通道 2 在报警，它的「删除」是禁用的），"
+		+ "叶子测量项没有按钮 —— 行内按钮是按行配的、不必每行都有。"
 		+ "收起的行按钮会自动隐藏、展开后回来；行被 remove() 掉则连按钮一起回收。"))
 
 

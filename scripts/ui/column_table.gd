@@ -39,6 +39,23 @@ extends Control
 ## 列宽规则：拖动表头相邻列之间的分隔线调列宽（最小 `TABLE_MIN_COL`）；
 ## **最后一列自动填满剩余宽度**，不参与拖拽。颜色从 `_theme_type()` 的类型读取
 ## （回退到 ThemePalette 令牌），因此随全局主题统一调整。
+##
+## ## 内建滚动（表头固定）
+##
+## 默认**不开**：内容有多高就报多高，行为与「没有滚动这回事」的年代完全一致。
+## 要长列表滚动就显式给一个上限：
+##   `set_max_visible_rows(8)` —— 最多显示 8 行，再多就由控件自己出滚动条
+##   `set_max_height(320.0)`   —— 直接限制控件总高（表头 + 表体）
+## 两者都设时取更小的那个；传 0 取消该项。
+##
+## 与「套一层 `ScrollContainer`」的区别在于**表头钉住不动**：那种写法会把表头一起滚走。
+##
+## 三条不变量（改这个文件时别破坏）：
+##   1. 没 opt-in 时 `_get_minimum_size().y == get_required_height()`、`_scroll == 0`、
+##      `clip_contents == false`，渲染路径与从前逐像素一致；
+##   2. **滚动绝不调 `update_minimum_size()`** —— 那会让容器每滚一格就重排一次；
+##   3. `_scroll` 只由 `set_scroll()` 写，且 `_layout_rows()` 返回的仍是**未减偏移的内容坐标**，
+##      内容坐标 → 控件坐标的换算**全表只有 `_place_action_cell()` 一处**。
 
 ## 单元格按钮被点击：`uid` 是行标识（见 `set_row_actions`），`index` 是该行第几个按钮，
 ## `action` 是按钮的 `action` 字段（没写就是按钮文字）。
@@ -56,10 +73,23 @@ var _drag_start_w := 0.0
 ## uid -> {"col": int, "box": HBoxContainer}
 var _action_cells := {}
 
+# ---- 内建滚动 ----
+var _scroll := 0.0                  # 表体滚动偏移（px，>= 0；表头不参与）
+var _scrollbar_active := false      # 内容是否已超出上限（决定滚动条显隐与末列留宽）
+var _vbar: VScrollBar = null
+var _bar_w := ThemePalette.SCROLLBAR_W   # 右侧给滚动条留的宽度（实测值，可能比令牌宽）
+var _max_visible_rows := 0          # 0 = 不限
+var _max_height := 0.0              # 0 = 不限
+
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	resized.connect(_on_resized)
+	_ensure_vbar()
+	# 入树瞬间补一次：**`resized` 可能在 `_ready()` 之前就已经发生过**（用 `--script` 起的
+	# 测试场景里必然如此：容器排完版才轮到 ready 通知），那一次没人在听，
+	# 于是行内按钮会停在 (0,0) 且不可见 —— 直到下一次 resize 才归位。
+	_on_resized()
 
 
 ## 设置列标题与初始列宽（宽度个数应与标题个数一致；最后一列宽度会被忽略、自动填满）。
@@ -79,11 +109,13 @@ func _col_w(i: int) -> float:
 	if _widths.is_empty():
 		return 0.0
 	if i == _widths.size() - 1:
-		# 最后一列填满剩余宽度（至少留 TABLE_MIN_COL），避免被其它列挤到溢出台面
+		# 最后一列填满剩余宽度（至少留 TABLE_MIN_COL），避免被其它列挤到溢出台面。
+		# 滚动生效时先把滚动条占的宽度扣掉，否则末列的文字会被压在滚动条底下。
 		var used := 0.0
 		for k in range(_widths.size() - 1):
 			used += _widths[k]
-		return maxf(size.x - used, ThemePalette.TABLE_MIN_COL)
+		var avail := size.x - (_bar_w if _scrollbar_active else 0.0)
+		return maxf(avail - used, ThemePalette.TABLE_MIN_COL)
 	return _widths[i]
 
 
@@ -124,17 +156,20 @@ func set_min_width(width: float) -> void:
 ## 都不会把自动高度弄丢。**别改成自己写 custom_minimum_size.y** ——
 ## 之前就是这么写的，结果调用方一句 `custom_minimum_size = Vector2(390, 0)`
 ## 就把高度清零了，控件随即在自己的矩形之外画表格（表现为表格被裁掉）。
+## 内容高度的上报口。**没 opt-in 时就是 `get_required_height()` 原文** ——
+## `minf(x, INF) == x`，所以「没上滚动」的那条路与从前逐位一致（这是整套改动的底线）。
 func _get_minimum_size() -> Vector2:
-	return Vector2(0.0, get_required_height())
+	return Vector2(0.0, minf(get_required_height(), _limit_height()))
 
 
-## 列数 / 列宽 / 行数变化后的统一入口：**重算最小尺寸、重摆单元格按钮、重绘**，三件一起做。
+## 列数 / 列宽 / 行数变化后的统一入口：**重算最小尺寸、更新滚动条、重摆单元格按钮、重绘**。
 ##
 ## 调用方**不要**再去补其中任何一件 —— 漏掉一件就是一个 bug。这里原来少了 `queue_redraw()`，
 ## 于是「拖拽列宽」那条路自己写了 `queue_redraw()` 却没重摆按钮，结果拖动分隔线时
 ## 表头跟着走、行内按钮钉在原地不动（DeepScribe 报回来的就是这个）。
 func _on_columns_changed() -> void:
 	update_minimum_size()
+	_update_scrollbar()
 	_on_widths_changed()
 
 
@@ -149,7 +184,178 @@ func _on_widths_changed() -> void:
 
 
 func _on_resized() -> void:
-	_on_widths_changed()         # 窗口尺寸变了 ⇒ 最后一列宽度跟着变 ⇒ 按钮的 x 要跟着走
+	# 控件尺寸变了：滚动条要重新摆位、「内容是否超出上限」也可能变了，
+	# 然后才是「最后一列宽度变了 ⇒ 按钮的 x 要跟着走」。
+	# **仍然不调 `update_minimum_size()`** —— 尺寸是高度契约的输出，不是输入（见文件头第 2 条）。
+	_layout_scrollbar()
+	_update_scrollbar()
+	_on_widths_changed()
+
+
+# ---------------------------------------------------------------- 内建滚动
+
+## 最多显示几行（超出就出滚动条）。传 0 / 负数取消。表头不计入行数。
+func set_max_visible_rows(rows: int) -> void:
+	_max_visible_rows = maxi(rows, 0)
+	update_minimum_size()
+	_update_scrollbar()
+	queue_redraw()
+
+
+func get_max_visible_rows() -> int:
+	return _max_visible_rows
+
+
+## 直接限制控件总高（含表头）。传 0 / 负数取消。
+func set_max_height(px: float) -> void:
+	_max_height = maxf(px, 0.0)
+	update_minimum_size()
+	_update_scrollbar()
+	queue_redraw()
+
+
+func get_max_height() -> float:
+	return _max_height
+
+
+## 当前是否真的在滚动（= 内容超出了上限）。
+func is_scrollable() -> bool:
+	return _scrollbar_active
+
+
+func get_scroll() -> float:
+	return _scroll
+
+
+## 设置滚动偏移（会被钳到 `[0, _max_scroll()]`）。这是**唯一**写 `_scroll` 的地方。
+func set_scroll(value: float) -> void:
+	var v := clampf(value, 0.0, _max_scroll())
+	if is_equal_approx(v, _scroll):
+		return
+	_scroll = v
+	if _vbar != null and is_instance_valid(_vbar):
+		# 用 no_signal 版本：否则会把这次设置再回灌进 _on_vbar_changed()，转一圈
+		_vbar.set_value_no_signal(v)
+	_relayout_actions()          # 按钮的 y 跟着偏移走
+	_on_scrolled()
+	queue_redraw()
+
+
+func scroll_by(delta: float) -> void:
+	set_scroll(_scroll + delta)
+
+
+## 把某一行滚进视野（程序化选中一行时用，免得「选中了却看不见」）。
+func ensure_row_visible(uid: int) -> void:
+	for row in _layout_rows():
+		if int(row["uid"]) != uid:
+			continue
+		var top := float(row["top"]) - ThemePalette.TABLE_HEADER_H
+		var bottom := top + float(row["height"])
+		if top < _scroll:
+			set_scroll(top)
+		elif bottom > _scroll + _body_view_h():
+			set_scroll(bottom - _body_view_h())
+		return
+
+
+## 内部滚动条（只读用途，主要给回归检查脚本断言用）。
+func get_scroll_bar() -> VScrollBar:
+	return _ensure_vbar()
+
+
+## 高度上限；未 opt-in 时返回 `INF`（于是 `minf(内容高, INF) == 内容高`）。
+func _limit_height() -> float:
+	var limit := INF
+	if _max_visible_rows > 0:
+		limit = ThemePalette.TABLE_HEADER_H + ThemePalette.TABLE_ROW_H * float(_max_visible_rows)
+	if _max_height > 0.0:
+		limit = minf(limit, _max_height)
+	return limit
+
+
+## 表体可视高度（不含表头）。
+func _body_view_h() -> float:
+	return maxf(size.y - ThemePalette.TABLE_HEADER_H, 0.0)
+
+
+func _max_scroll() -> float:
+	if not _scrollbar_active:
+		return 0.0
+	return maxf(get_required_height() - ThemePalette.TABLE_HEADER_H - _body_view_h(), 0.0)
+
+
+## 需不需要滚动条。**只看「内容 vs 上限」，刻意不看 `size`** ——
+## 否则「滚动条出现 ⇒ 末列变窄 ⇒ size 变 ⇒ 又要重算」会绕成一个回环，
+## 而且首帧 `size.y == 0` 时还会误判成「装不下」闪一下滚动条。
+func _needs_scroll() -> bool:
+	var limit := _limit_height()
+	return is_finite(limit) and get_required_height() > limit + 0.5
+
+
+func _ensure_vbar() -> VScrollBar:
+	if _vbar != null and is_instance_valid(_vbar):
+		return _vbar
+	_vbar = VScrollBar.new()
+	_vbar.visible = false
+	_vbar.step = ThemePalette.TABLE_ROW_H
+	_vbar.custom_step = ThemePalette.TABLE_ROW_H     # 一次滚一行，和逐行的心智模型对齐
+	_vbar.value_changed.connect(_on_vbar_changed)
+	add_child(_vbar)
+	_layout_scrollbar()
+	return _vbar
+
+
+## 只摆位置（resize 走这条，不做显隐决策）。
+func _layout_scrollbar() -> void:
+	if _vbar == null or not is_instance_valid(_vbar):
+		return
+	# 预留宽度以**实测**最小宽度为准：主题给的样式盒比令牌宽的话，
+	# 只按令牌预留会让末列内容压在滚动条底下。恒取两者的大者。
+	_bar_w = maxf(ThemePalette.SCROLLBAR_W, _vbar.get_combined_minimum_size().x)
+	_vbar.position = Vector2(size.x - _bar_w, ThemePalette.TABLE_HEADER_H)
+	_vbar.size = Vector2(_bar_w, _body_view_h())
+
+
+## 显隐 + 配 Range + 钳制偏移。**不调 `update_minimum_size()`**（见文件头第 2 条）。
+func _update_scrollbar() -> void:
+	var want := _needs_scroll()
+	var changed := want != _scrollbar_active
+	_scrollbar_active = want
+	# 裁剪只在滚动生效时打开：没 opt-in 时保持和从前一样（哪怕按钮溢出台面也不裁）
+	clip_contents = want
+
+	var bar := _ensure_vbar()
+	if bar == null:
+		return
+	bar.visible = want
+	var body_content := maxf(get_required_height() - ThemePalette.TABLE_HEADER_H, 0.0)
+	bar.max_value = body_content
+	bar.page = minf(_body_view_h(), body_content)
+	set_scroll(_scroll)          # 内容变短 / 窗口变大后偏移可能越界，钳一下
+	if changed:
+		# 滚动条的出现会改变末列宽度 ⇒ 按钮的 x 要重摆、画面要重画
+		_on_widths_changed()
+
+
+func _on_vbar_changed(value: float) -> void:
+	set_scroll(value)
+
+
+## 滚动发生后的钩子（子类可覆写，例如清理悬停高亮）。
+func _on_scrolled() -> void:
+	pass
+
+
+## 本帧需要绘制的行区间 `[x, y)`。未启用滚动时恒为 `[0, n)` ——
+## 这正是「没 opt-in 就和从前逐像素一致」的来源。
+## 末尾多画一行是有意的：让最后一行下沿的接缝也画出来，多出来的部分交给 `clip_contents` 裁掉。
+func _visible_row_range(row_h: float, n: int) -> Vector2i:
+	if not _scrollbar_active or row_h <= 0.0:
+		return Vector2i(0, n)
+	var first := clampi(int(floor(_scroll / row_h)), 0, n)
+	var last := clampi(int(ceil((_scroll + _body_view_h()) / row_h)) + 1, first, n)
+	return Vector2i(first, last)
 
 
 # ---------------------------------------------------------------- 单元格按钮
@@ -215,8 +421,11 @@ func clear_all_actions() -> void:
 		_remove_action_cell(uid)
 
 
-## 子类覆写：当前**可见**的行，每项 `{"uid": int, "top": float, "height": float}`
-## （`top` 含表头偏移，用控件自身坐标）。基类据此摆放按钮。
+## 子类覆写：当前**未被折叠**的行，每项 `{"uid": int, "top": float, "height": float}`。
+##
+## `top` 是**内容坐标**：`TABLE_HEADER_H + 行序 × TABLE_ROW_H`，**不扣滚动偏移**。
+## 换算成控件坐标只在 `_place_action_cell()` 里做一次（见文件头第 3 条）——
+## 这个契约是刻意保持不变的，下游项目可能覆写了本函数，改签名会静默破坏它们。
 func _layout_rows() -> Array:
 	return []
 
@@ -266,12 +475,20 @@ func _place_action_cell(uid: int, top: float, height: float) -> void:
 	var box: Control = cell["box"]
 	if not is_instance_valid(box):
 		return
+	# 内容坐标 → 控件坐标：**全表只有这一处减滚动偏移**（`_layout_rows()` 的契约保持不变）
+	var y := top - _scroll
+	# 已经滚到表体带之外的行：把按钮藏起来。
+	# 顶部那条尤其要注意 —— 不藏的话它会画到表头上面去（裁剪矩形是整个控件，
+	# 表头就在矩形里面，裁不掉）。
+	if _scrollbar_active and (y < ThemePalette.TABLE_HEADER_H - 0.5 or y >= size.y):
+		box.hide()
+		return
 	# 先取到最小尺寸，才知道要往上挪多少才能垂直居中
 	box.reset_size()
 	var col := int(cell["col"])
 	var left := 0.0 if col <= 0 else _sep_x(col - 1)
 	box.position = Vector2(left + ThemePalette.TABLE_PAD,
-			top + (height - box.size.y) * 0.5)
+			y + (height - box.size.y) * 0.5)
 	box.visible = true
 
 
@@ -299,6 +516,19 @@ func _theme_type() -> StringName:
 
 
 func _gui_input(event: InputEvent) -> void:
+	# 滚轮：只有「表体」区域响应，且只在滚动生效时。
+	# （`ScrollBar` 自己不消费滚轮事件，只有 `ScrollContainer` 会 —— 所以这里不会双重滚动。）
+	if _scrollbar_active and event is InputEventMouseButton and event.pressed \
+			and event.position.y > ThemePalette.TABLE_HEADER_H:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			scroll_by(-ThemePalette.TABLE_ROW_H)
+			accept_event()
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			scroll_by(ThemePalette.TABLE_ROW_H)
+			accept_event()
+			return
+
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			# 只有表头那一行才能起拖；表体的点击留给子类自己处理（见 TreeTable）

@@ -21,6 +21,9 @@ config/features=PackedStringArray("4.7")
 
 [autoload]
 
+; InstanceGuard 放最前：单实例开关是关闭的（默认允许多开），开着的时候越早退出越好。
+; 打开方式：命令行 --single-instance，或 [app] single_instance=true。
+InstanceGuard="*res://scripts/autoload/instance_guard.gd"
 ThemeManager="*res://scripts/autoload/theme_manager.gd"
 NetClient="*res://scripts/autoload/net_client.gd"
 AppShell="*res://scripts/autoload/app_shell.gd"

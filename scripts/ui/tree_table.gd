@@ -252,10 +252,19 @@ func _rebuild_visible() -> void:
 		item_selected.emit(null)
 	if _hovered != null and not _visible.has(_hovered):
 		_hovered = null
-	# 可见行数变了 → 高度也变了，让容器重新问一次最小尺寸；单元格按钮也要跟着重新摆
+	# 可见行数变了 → 高度也变了，让容器重新问一次最小尺寸；
+	# 内容高也变了 → 要不要滚动条可能跟着翻转；单元格按钮也要重新摆
 	update_minimum_size()
+	_update_scrollbar()
 	_relayout_actions()
 	queue_redraw()
+
+
+## 滚动后原本高亮的那一行可能已经不在鼠标下了：先撤销，等鼠标再动时重算。
+func _on_scrolled() -> void:
+	if _hovered != null:
+		_hovered = null
+		queue_redraw()
 
 
 ## 缩进层级 `level` 那根竖线在本行画多长。返回值：
@@ -299,10 +308,15 @@ func _collect(item: TreeTableItem) -> void:
 
 
 ## 命中第几行（-1 = 没命中行）。
+##
+## **表头带必须显式挡掉**：加了滚动偏移之后，表头那一小段 y 会让
+## `pos.y - HEADER_H + _scroll` 变成非负，于是「点表头」会被算成「点了某一行」——
+## 这是加滚动时最容易悄悄引入的 bug（点表头没反应是小事，点表头把某一行选中/展开了才难查）。
 func _row_at(pos: Vector2) -> int:
-	if _visible.is_empty():
+	if _visible.is_empty() or pos.y < ThemePalette.TABLE_HEADER_H:
 		return -1
-	var i := int(floor((pos.y - ThemePalette.TABLE_HEADER_H) / ThemePalette.TABLE_ROW_H))
+	var i := int(floor((pos.y - ThemePalette.TABLE_HEADER_H + _scroll)
+			/ ThemePalette.TABLE_ROW_H))
 	return i if i >= 0 and i < _visible.size() else -1
 
 
@@ -379,14 +393,15 @@ func _draw() -> void:
 	var guide := _theme_color(&"guide_color", ThemePalette.BORDER_STRONG)
 
 	draw_rect(Rect2(0, header_h, size.x, size.y - header_h), cell_bg, true)
-	draw_rect(Rect2(0, 0, size.x, header_h), header_bg, true)
 
 	var arrow_open := _theme_icon(&"arrow_expanded", "arrow_down.svg")
 	var arrow_closed := _theme_icon(&"arrow_collapsed", "arrow_right.svg")
 
-	# ---- 行 ----
-	var y := header_h
-	for item in _visible:
+	# ---- 行（只画可见区间，并按滚动偏移整体上移）----
+	var span := _visible_row_range(row_h, _visible.size())
+	var y := header_h - _scroll + float(span.x) * row_h
+	for r in range(span.x, span.y):
+		var item := _visible[r]
 		var is_sel := item == _selected
 		if is_sel:
 			draw_rect(Rect2(0, y, size.x, row_h), selected_bg, true)
@@ -430,16 +445,20 @@ func _draw() -> void:
 			cx += _col_w(c)
 		y += row_h
 
-	# ---- 列分隔线（画在行之上，避免被选中底色盖掉） ----
+	# 底边线（滚到中间时贴在表体下沿，滚到底时就是原来的位置）
+	draw_line(Vector2(0, minf(y, size.y)), Vector2(size.x, minf(y, size.y)), grid, 1.0)
+
+	# ---- 表头（最后画）----
+	# 顺序在这里很关键：表头底色压在表体之上，才会盖住「往上滚时压进表头带里的那半行」。
+	# 没滚动时 `_scroll == 0`、没有任何行会落进表头带，绘制结果与从前一致。
+	draw_rect(Rect2(0, 0, size.x, header_h), header_bg, true)
+	# 列分隔线（画在行之上，避免被选中底色盖掉）
 	for i in range(_titles.size()):
 		var sx := _sep_x(i)
 		draw_line(Vector2(sx, 0), Vector2(sx, size.y), grid, 1.0)
 		draw_string(font, Vector2(sx - _col_w(i) + pad, header_h / 2.0 + fs * 0.35), _titles[i],
 				HORIZONTAL_ALIGNMENT_LEFT, _col_w(i) - pad * 2.0, fs, header_text)
-
-	# 表头下沿 + 底边线
 	draw_line(Vector2(0, header_h), Vector2(size.x, header_h), grid, 1.0)
-	draw_line(Vector2(0, y), Vector2(size.x, y), grid, 1.0)
 
 
 func _cell_text(item: TreeTableItem, col: int) -> String:

@@ -16,6 +16,12 @@
     python backend/main.py --port 9000    # 换端口（端口被占用时）
     python backend/main.py --log-file x.log   # 同时把日志写进文件
 
+多客户端与生命周期：**每个前端连接是一个独立 Session**，所以多个前端可以同时连着，
+互不干扰（各自跑各自的模拟）。后端会向所有客户端广播 `{"type":"clients","count":N}`。
+加了 `--exit-with-last-client`（前端自动拉起时会传）后，最后一个客户端断开再等
+`--linger-sec` 秒仍无人连接，后端就自己退出 —— 这样「前端 A 退出」不会连带把
+「前端 B 正在用的后端」杀掉，也兜住了前端被强杀时的孤儿进程。
+
 也可以由前端自动拉起（见 `scripts/autoload/backend_launcher.gd` 与 project.godot 的
 `[backend]` 段）。那种情况下本进程是**脱离进程**、stdout 没人接，所以前端会传
 `--log-file` —— 「后端起不来」时前端唯一能拿到的线索就是它。
@@ -43,10 +49,31 @@ from rayleigh_sommerfeld import Config as RSConfig, Simulation, load_params
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 SERVER_NAME = "godot4gui-backend"
-BACKEND_VERSION = "1.1"
+BACKEND_VERSION = "1.2"
 MAX_LOG_BYTES = 2 * 1024 * 1024     # 日志超过这个大小就轮转一次，避免长期运行无限膨胀
+DEFAULT_LINGER_SEC = 5.0            # 最后一个客户端断开后，等这么久还没人来就连自己一起收掉
 
 _log_handle = None
+
+# ---- 客户端与生命周期 ----
+# 每个前端连接是一个独立的 Session（互不共享状态），所以「多个前端同时开着」本身是安全的。
+# 真正需要管的是**进程归属**：前端 A 退出时不该把前端 B 正在用的后端一起带走。
+# 于是这里做两件事：
+#   1. 广播在线客户端数 —— 前端据此决定「我是不是最后一个，能不能收进程」；
+#   2. 可选地「最后一个客户端走后再等一会儿就自己退出」—— 这条兜住前端被强杀
+#      （`taskkill /F`，来不及跑 `_exit_tree`）的情况，否则后端会变成孤儿进程占着端口。
+_clients: "set[Session]" = set()
+_had_client = False
+_exit_with_last_client = False
+_linger_sec = DEFAULT_LINGER_SEC
+# 「一个客户端都没等到」的兜底时长。前端拉起后端后可能在它监听之前就退出了
+# （用户开了就关、启动失败、被强杀），那种情况下后端**永远不会**收到
+# 「最后一个客户端断开」，光靠 linger 是收不掉的 —— 会变成孤儿进程占着端口。
+# 给足前端连接的时间（前端自己的等待上限是 25s），超了就当没人要这个后端。
+DEFAULT_NO_CLIENT_TIMEOUT_SEC = 60.0
+_no_client_timeout = DEFAULT_NO_CLIENT_TIMEOUT_SEC
+_linger_task: "asyncio.Task | None" = None
+_shutdown: "asyncio.Event | None" = None
 
 
 # ---------------------------------------------------------------- 日志
@@ -217,7 +244,7 @@ class Session:
             # 而不是撞上了别的程序占着同一个端口（见 backend_launcher.gd 的 _verified）。
             log("[backend] 收到 hello")
             await self.send({"type": "hello_ack", "server": SERVER_NAME,
-                             "version": BACKEND_VERSION})
+                             "version": BACKEND_VERSION, "clients": len(_clients)})
             return
         if kind != "command":
             return
@@ -239,10 +266,82 @@ class Session:
         await self.send({"type": "ack", "id": msg.get("id"), "cmd": cmd})
 
 
+async def broadcast(payload: dict) -> None:
+    """把一条消息发给所有在线客户端（断开的跳过，不影响别人）。
+
+    目前只用来广播在线客户端数 —— 前端靠它判断「我退出时能不能把后端进程一起收掉」。
+    """
+    for session in list(_clients):
+        try:
+            await session.send(payload)
+        except (ConnectionClosed, RuntimeError):
+            pass        # 正好断了：它自己的 finally 会做清理
+
+
+async def _client_count_changed() -> None:
+    await broadcast({"type": "clients", "count": len(_clients)})
+
+
+def _schedule_linger_exit() -> None:
+    """最后一个客户端走了：起一个「宽限期」计时，到期还没人来就自己退出。
+
+    这条**不是可选的美化**：前端被 `taskkill /F` 掉时 `_exit_tree` 根本没机会跑，
+    没有它后端就会一直占着端口当孤儿进程（模板的已知限制之一）。
+    """
+    global _linger_task
+    if not _exit_with_last_client:
+        return
+    if _linger_task is not None and not _linger_task.done():
+        return
+    _linger_task = asyncio.create_task(_linger_then_exit())
+
+
+async def _linger_then_exit() -> None:
+    log(f"[backend] 最后一个客户端已断开，{_linger_sec:g} 秒内没人连进来就退出")
+    try:
+        await asyncio.sleep(_linger_sec)
+    except asyncio.CancelledError:
+        return
+    if _clients:
+        return
+    log("[backend] 空闲超时，后端退出（下次前端启动时会自动拉起）")
+    if _shutdown is not None:
+        _shutdown.set()
+
+
+def _cancel_linger() -> None:
+    global _linger_task
+    if _linger_task is not None and not _linger_task.done():
+        _linger_task.cancel()
+    _linger_task = None
+
+
+async def _watch_for_first_client() -> None:
+    """`--exit-with-last-client` 的配套兜底：等这么久还没人来，就当没人要，自己退。
+
+    没有它的话，「前端把后端拉起来、还没连上就被关掉/强杀」会让后端**永远**留着
+    （`_schedule_linger_exit()` 只有在「有过客户端、又都走了」时才会被调到）。
+    """
+    try:
+        await asyncio.sleep(_no_client_timeout)
+    except asyncio.CancelledError:
+        return
+    if _had_client or _clients:
+        return
+    log(f"[backend] 启动后 {_no_client_timeout:g} 秒内没有客户端连进来，退出")
+    if _shutdown is not None:
+        _shutdown.set()
+
+
 async def handler(websocket):
+    global _had_client
     log(f"[backend] 客户端接入 {websocket.remote_address}")
     session = Session(websocket)
+    _clients.add(session)
+    _had_client = True
+    _cancel_linger()                 # 宽限期内有人连进来了，取消退出
     producer = asyncio.create_task(session.sample_loop())
+    await _client_count_changed()
     try:
         async for raw in websocket:
             try:
@@ -257,13 +356,25 @@ async def handler(websocket):
     finally:
         producer.cancel()
         await session.stop_simulation()
+        _clients.discard(session)
+        await _client_count_changed()
+        if not _clients:
+            _schedule_linger_exit()
 
 
 async def main(host: str, port: int) -> None:
+    global _shutdown
+    _shutdown = asyncio.Event()
     try:
         async with websockets.serve(handler, host, port):
-            log(f"[backend] 监听 ws://{host}:{port}（Ctrl+C 停止）")
-            await asyncio.Future()   # 一直运行，直到 Ctrl+C
+            log(f"[backend] 监听 ws://{host}:{port}（Ctrl+C 停止）"
+                  + ("，最后一个客户端断开后自动退出" if _exit_with_last_client else ""))
+            if _exit_with_last_client:
+                asyncio.create_task(_watch_for_first_client())
+            # 默认一直运行到 Ctrl+C；开了 --exit-with-last-client 时，
+            # 空闲超时（或一个客户端都没等到）会 set() 这个事件，于是这里返回、
+            # serve 关闭、进程退出。
+            await _shutdown.wait()
     except OSError as exc:
         # 端口被占用（Windows 常见 WinError 10048）等启动失败
         log(f"[backend] 启动失败：无法监听 ws://{host}:{port}（端口被占用）")
@@ -287,7 +398,21 @@ if __name__ == "__main__":
                     help=f"监听端口（默认 {DEFAULT_PORT}）")
     ap.add_argument("--log-file", default="", metavar="PATH",
                     help="把日志同时写进这个文件（前端自动拉起时会传，便于排查启动失败）")
+    ap.add_argument("--exit-with-last-client", action="store_true",
+                    help="最后一个客户端断开后再等 --linger-sec 秒就退出（前端自动拉起时会传）。"
+                         "手动直跑时不加这个参数，行为与从前一致：一直运行到 Ctrl+C")
+    ap.add_argument("--linger-sec", type=float, default=DEFAULT_LINGER_SEC,
+                    help=f"配合 --exit-with-last-client 的宽限秒数（默认 {DEFAULT_LINGER_SEC:g}）")
+    ap.add_argument("--no-client-timeout", type=float, default=DEFAULT_NO_CLIENT_TIMEOUT_SEC,
+                    help="配合 --exit-with-last-client：启动后这么久还没有任何客户端连接就退出"
+                         f"（默认 {DEFAULT_NO_CLIENT_TIMEOUT_SEC:g}s），兜住「前端把后端起起来、"
+                         "还没连上就被关掉」留下的孤儿进程")
     args = ap.parse_args()
+
+    # 这里是模块级代码（不在函数里），直接赋值即写到模块全局，不需要 global 声明。
+    _exit_with_last_client = args.exit_with_last_client
+    _linger_sec = max(args.linger_sec, 0.0)
+    _no_client_timeout = max(args.no_client_timeout, 0.0)
 
     open_log_file(args.log_file)
     if args.log_file:

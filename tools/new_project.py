@@ -43,9 +43,12 @@ COPY_FILES = [
     "backend/requirements.txt",
     "docs/gdscript-only-guide.md",
     "docs/godot-facts-verified.md",
+    "docs/slim-export-template.md",
     # 控件库跟着项目走，那它的回归检查也一起走：
     #   godot --headless --path . --script res://tools/checks/table_actions.gd
+    #   godot --headless --path . --script res://tools/checks/scroll_bars.gd
     "tools/checks/table_actions.gd",
+    "tools/checks/scroll_bars.gd",
 ]
 # gallery（开发期参照手册）：--no-gallery 时不拷
 GALLERY_FILES = [

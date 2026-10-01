@@ -78,7 +78,10 @@ python tools/new_project.py <目标目录> [--name 工程名] [--title 界面标
 `themes/`（图标 + 着色器）、`project.godot`（改名后，`[backend] python=` 会改写成本机跑脚手架的那个解释器）、
 `backend/requirements.txt`、`scenes/gallery.tscn` + `scripts/gallery.gd`、
 `docs/gdscript-only-guide.md`（不需要后端时看这篇）、
-`tools/checks/table_actions.gd`（表格行内按钮的回归检查，改表格后跑一下）；
+`docs/godot-facts-verified.md`（Godot 4.7 实测事实与坑）、
+`docs/slim-export-template.md`（把导出的 exe 从 104 MB 压到 33 MB 的实测配方）、
+`tools/checks/table_actions.gd`、`tools/checks/scroll_bars.gd`
+（表格行内按钮 / 滚动条的回归检查，改控件后各跑一下，期望 `[check] PASS`）；
 `.claude/skills/`（可选，Claude Code 的开发规范）。
 
 **替换成本项目的骨架**：
@@ -442,6 +445,10 @@ t.set_font_size("label_font_size", "MyGauge", ThemePalette.FONT_SM)
 | 文件对话框选不了文件 | `FileDialog.file_mode` 默认是 `FILE_MODE_SAVE_FILE`，要显式设 `FILE_MODE_OPEN_FILE` |
 | 报警文字越看越暗 | 别用 `modulate` 改颜色，用 `FlashLabel` 或 `font_color`（modulate 是相乘） |
 | 表格拖不动列宽 | Godot 的 `Tree` 不支持，用本项目 `DataTable`；要层级就用 `TreeTable` |
+| 表格很长想要滚动 | 用 `set_max_visible_rows(n)` / `set_max_height(px)`（表头钉住）；**别套外层 `ScrollContainer`**，那会把表头一起滚走 |
+| 日志只有最后一条 | 别用 `Label` 反复改 `text`，用本项目 `LogView`（可滚动/可回看/可复制） |
+| 滚动条看不见、抓不住 | 主题里 `ScrollBar` 样式盒的 `content_margin` 是 0（滚动条粗细=样式盒最小尺寸）。别改成 0，`tools/checks/scroll_bars.gd` 有断言钉着 |
+| 关掉一个前端，另一个前端也掉线 | 后端被连带杀了。前端应只在「自己是最后一个客户端」时才收进程；后端起的时候带 `--exit-with-last-client` 让它自己收尾 |
 | 伪彩图整幅全黑 | 只清了显示范围没复位 `auto_range`（`vmax` 落到 `1e-30`）。用 `_reset_range()` 一次性复位两件事 |
 | 关窗时弹「与后端断开连接」 | 收尾顺序反了：先 `NetClient.begin_shutdown()` 再杀后端进程，否则后端一死被读成「崩了」 |
 | 退出后残留 python 进程 | `OS.create_process` 起的进程不随 Godot 退出；要么 `_exit_tree` 里 `OS.kill(pid)`，要么接受它 |

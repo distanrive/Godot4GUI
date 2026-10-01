@@ -19,6 +19,10 @@ extends Node
 ## 只连不管（不越权去杀别人的进程），自己起的则在退出时按 `backend/kill_on_exit` 收掉
 ## （`OS.create_process` 起的进程**不会**随 Godot 退出而结束，不收就是孤儿进程）。
 ##
+## **多个前端可以同时开着**（后端每个连接一个独立 Session）。为了不让「A 退出」带走
+## 「B 正在用的后端」，退出时还要看后端广播的在线客户端数：只有自己是最后一个才收进程，
+## 否则撒手交给后端的 `--exit-with-last-client` 自退。
+##
 ## 命令行（放在 `--` 之后）：`--no-backend-autostart`。
 
 signal status_changed(text: String, level: String)
@@ -45,6 +49,9 @@ var _log_path := ""
 
 var _owned_pid := 0
 var _verified := false            # 是否收到过 hello_ack（确认端口上确实是我们这个后端）
+## 后端报来的在线前端数（后端每次连接/断开都会广播）。
+## 初值给 1 = 「当自己是唯一的」：老版本后端不发这条消息时，退出行为与从前一致（收掉进程）。
+var _clients := 1
 var _status := "未连接后端"
 var _level := "idle"
 var _shutting_down := false
@@ -189,8 +196,16 @@ func _on_disconnected() -> void:
 func _on_data(payload: Variant) -> void:
 	if typeof(payload) != TYPE_DICTIONARY:
 		return
-	if str(payload.get("type", "")) == "hello_ack":
+	var kind := str(payload.get("type", ""))
+	if kind == "hello_ack":
 		_verified = true
+		if payload.has("clients"):
+			_clients = int(payload["clients"])
+		_refresh_running_status()
+	elif kind == "clients":
+		# 后端每次连接/断开都广播在线数 —— 退出时靠它判断「我是不是最后一个」
+		# （不是最后一个就把进程留着，否则会把别人的后端一起带走）
+		_clients = maxi(int(payload.get("count", 1)), 1)
 		_refresh_running_status()
 
 
@@ -247,8 +262,11 @@ func _on_probe_finished() -> void:
 func _spawn() -> void:
 	_attempts += 1
 	_ensure_log_dir()
+	# `--exit-with-last-client`：最后一个前端断开后后端自己退，于是「A 前端退出」
+	# 不会再打断「B 前端正在用的后端」，前端被强杀时也不会留下孤儿进程。
 	var args := PackedStringArray([
-		_script, "--host", _host, "--port", str(_port), "--log-file", _log_path])
+		_script, "--host", _host, "--port", str(_port), "--log-file", _log_path,
+		"--exit-with-last-client"])
 	var pid := OS.create_process(_python, args)
 	if pid <= 0:
 		_fail("无法创建进程：%s（err=%d）" % [_python, pid])
@@ -273,6 +291,9 @@ func _refresh_running_status() -> void:
 		who += "，已确认是 Godot4GUI 后端"
 	elif _owned_pid != 0:
 		who += "，尚未收到 hello_ack"
+	# 多于一个前端连着时说清楚：这时退出**不会**收掉后端进程（还有别人在用）
+	if _clients > 1:
+		who += "，共 %d 个前端在连" % _clients
 	_set_status("已连接后端（%s）" % who, "ok")
 
 
@@ -377,5 +398,13 @@ func _exit_tree() -> void:
 	# 自己拉起的进程要自己收：create_process 起的进程不会随 Godot 退出而结束。
 	# `is_process_running()` 这一问不能省 —— pid 可能早已失效，而 `OS.kill()` 拿到
 	# 一个被系统回收复用的 pid 会杀掉不相干的进程。
-	if _kill_on_exit and _owned_pid != 0 and OS.is_process_running(_owned_pid):
+	#
+	# **但只有在「我是最后一个前端」时才收**：后端支持多客户端，别的窗口可能正连着。
+	# 不是最后一个就撒手 —— 后端会在最后一个客户端也断开后自己退出
+	# （`--exit-with-last-client`），所以不会变成孤儿进程。
+	if not _kill_on_exit or _owned_pid == 0:
+		return
+	if _clients > 1:
+		return
+	if OS.is_process_running(_owned_pid):
 		OS.kill(_owned_pid)

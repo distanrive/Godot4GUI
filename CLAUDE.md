@@ -39,7 +39,8 @@ Godot4GUI/
 │   │   ├── net_client.gd         # WebSocket 单例（NetClient）
 │   │   ├── theme_manager.gd      # 主题单例：启动时构建并应用全局主题
 │   │   ├── app_shell.gd          # 窗口最小尺寸 / DPI 界面缩放 / user://config.cfg（AppShell）
-│   │   └── backend_launcher.gd   # 后端连不上就自动拉起后端进程（BackendLauncher）
+│   │   ├── backend_launcher.gd   # 后端连不上就自动拉起后端进程（BackendLauncher）
+│   │   └── instance_guard.gd     # 可选单实例开关（默认关，见「多前端」）
 │   ├── theme/
 │   │   ├── theme_palette.gd      # 设计令牌（颜色/圆角/字号/间距，全局唯一可调来源）
 │   │   ├── theme_factory.gd      # 由令牌构建完整 Theme
@@ -62,6 +63,7 @@ Godot4GUI/
 │   │   ├── labeled_line_edit.gd     # 带标签输入框 LabeledLineEdit
 │   │   ├── expand_widget.gd         # 折叠展开 ExpandWidget（即时切换，无动画）
 │   │   ├── titled_group.gd          # 带标题控件组 TitledGroup
+│   │   ├── log_view.gd              # 滚动日志 LogView（级别配色/行数上限/自动跟随/可复制）
 │   │   └── stacked_container.gd     # 堆叠分页 StackedContainer
 │   └── util/fmt.gd               # 数字格式化 Fmt（GDScript 的 % 不支持 %e/%g）
 ├── themes/
@@ -79,6 +81,7 @@ Godot4GUI/
     ├── new-project-guide.md        # 【起新项目看这篇】完整开发指引
     ├── gdscript-only-guide.md      # 不用 Python 后端（纯 GDScript）时的写法、线程与性能红线
     ├── godot-facts-verified.md     # Godot 4.7 实测事实与坑（每条标注核验状态）
+    ├── slim-export-template.md     # 精简导出模板（104→33 MB）的实测、开关清单与复现步骤
     ├── todo.md                     # 当前状态、待办、未决问题与关键决定记录
     ├── siliconui-godot-mapping.md  # PyQt-SiliconUI -> Godot 迁移对照表
     └── plotting-alternatives.md    # 替代 matplotlib 的调研、选型与踩坑
@@ -95,7 +98,8 @@ Godot4GUI/
    手动开后端也可以：`python backend/main.py [--port 9000] [--log-file x.log]`，此时给前端加 `--no-backend-autostart`。
 3. 命令行自测：`godot scenes/main.tscn -- --preset=fast --autostart`
    （`--preset=fast` 用快速参数，`--autostart` 连上后端就开算；
-   另有 `--no-backend-autostart`、`--ui-scale=1.5`、`--python=<路径>`、`--backend-script=<路径>`。）
+   另有 `--no-backend-autostart`、`--ui-scale=1.5`、`--python=<路径>`、`--backend-script=<路径>`、
+  `--single-instance`（默认允许多开，加它才限制单实例）。）
 4. 用本模板起新项目：`python tools/new_project.py <目标目录> --title "..."`，
    生成后必须能 `--import` + 跑主场景无报错（改 `tools/` 后请照 `docs/new-project-guide.md` 末尾自测一遍）。
 
@@ -109,12 +113,18 @@ Godot4GUI/
 - `{"type":"sample","x":...,"y":...}` — 通用示例采样点（喂 TrendChart）
 - `{"type":"progress","value":...}` — 进度（0..100）
 - `{"type":"ack","id":N,"cmd":...}` — 命令回执
-- `{"type":"hello_ack","server":"godot4gui-backend","version":"..."}` — 对 `hello` 的应答，
+- `{"type":"hello_ack","server":"godot4gui-backend","version":"...","clients":N}` — 对 `hello` 的应答，
   前端据此确认端口上跑的确实是本后端（而不是别的程序占着这个端口）
+- `{"type":"clients","count":N}` — 在线前端数变化时广播（连接/断开各发一次）。
+  `BackendLauncher` 靠它判断「我退出时是不是最后一个客户端」
 
 前端 -> 后端：
 - `{"type":"hello"}`
 - `{"type":"command","id":N,"cmd":"...","args":{...}}` — `rs_start` / `rs_stop` / `rs_params` / `start` / `stop` / `estop`
+
+后端命令行（`BackendLauncher` 自动拉起时传的）：
+`--host` / `--port` / `--log-file` / `--exit-with-last-client` / `--linger-sec` / `--no-client-timeout`
+—— 后三个管多前端与进程生命周期，见「GDScript 约定」里的那条。
 
 ## GDScript 约定
 - 可复用控件用 `class_name` 声明（如 `TrendChart`、`FileDropBox`），业务脚本里直接 `ClassName.new()`。
@@ -127,6 +137,17 @@ Godot4GUI/
   改宽度用 `set_min_width()`（或设 `custom_minimum_size.x`）；**高度由内容自动上报，不要去写 `custom_minimum_size.y`** ——
   那是「至少这么高」，写 0 会把自动高度覆盖掉，控件随即在自己的矩形之外画表格（表现为表格被裁、行溢到卡片外面，踩过）。
   层级关系由 `TreeTable` 自己画（缩进 + 引导线 + 展开箭头），**单元格文本里不要手写 `└`/`├`**，否则和引导线重复。
+- **表格很长要滚动**：给 `set_max_visible_rows(n)` 或 `set_max_height(px)`（传 0 取消），
+  **表头会钉住不动**，表体自己出滚动条、滚轮可滚。
+  **不要**改成「外面套一层 `ScrollContainer`」—— 那会把表头一起滚走。
+  没设上限时行为与从前完全一致（高度仍按内容自动上报、不裁剪），所以是个纯 opt-in 的能力。
+  内部约定：`_layout_rows()` 返回的始终是**未减偏移的内容坐标**，内容坐标→控件坐标的换算只在
+  `_place_action_cell()` 里做一次；**滚动绝不调 `update_minimum_size()`**（否则容器每滚一格就重排）。
+- 日志用 `LogView`（可滚动、可回看、可复制）。**别再用一个 `Label` 反复 `text = msg`** ——
+  那样只能看见最后一条，出问题想往回翻就没了。
+  `append(text, level, source)`：`level` 取 `info/ok/warn/error/system` 走级别配色，
+  第三参是来源标签（设备名/通道名）。行数有上限（默认 2000）会自动裁最旧的，长时间跑不会把内存吃满；
+  文本里的方括号会自动转义，随便丢数据进去都不会被当成 BBCode。
 - **表格行内按钮**（「开始 / 暂停 / 删除」这类按行操作）用 `set_row_actions(uid, 列号, 规格数组)`（树表是 `set_item_actions(item, 列号, 规格数组)`）。
   规格每项 `{"text", "action", "variation", "tooltip", "disabled"}`；按钮是**真实 `Button` 节点**，
   主题变体/禁用态/tooltip 都照常生效，点是发 `cell_action_pressed(uid, index, action)` 信号。
@@ -144,6 +165,12 @@ Godot4GUI/
 - **后端进程生命周期交给 `BackendLauncher`**：它读 `project.godot` 的 `[backend]` 段（`python` / `script` / `autostart` / `kill_on_exit`），
   连不上就自动拉起，失败时把后端日志尾部摆给用户看。**不要**在业务脚本里自己 `OS.create_process`；
   也**不要**改成「扫 PATH 找 python」——工控机上多版本 Python 是常态，静默挑错解释器只会让后端悄无声息地起不来。
+- **多个前端可以同时开着**（后端每个连接一个独立 `Session`，互不共享状态）。配套两条约定：
+  - 后端向所有客户端广播 `{"type":"clients","count":N}`；`BackendLauncher` 据此在退出时**只在自己是最后一个客户端时**才 `OS.kill` 后端进程。
+    少了这一条，「关掉前端 A」会顺手杀掉「前端 B 正在用的后端」，B 界面上弹一句莫名其妙的「与后端断开连接」。
+  - 前端拉起的后端带 `--exit-with-last-client`（+ `--linger-sec` / `--no-client-timeout`）：最后一个客户端走后再等几秒无人连接就自己退出。
+    这条同时兜住「前端被 `taskkill /F`」（`_exit_tree` 来不及跑）与「前端把后端起起来、还没连上就被关掉」两种情况 —— 否则后端会变孤儿进程占着端口。
+  - 想干脆禁掉多开：`--single-instance` 或 `project.godot` 的 `[app] single_instance=true`（`InstanceGuard`），第二次启动会把已有窗口叫到前面再自己退出。
 - **界面缩放/窗口尺寸交给 `AppShell`**：`content_scale_factor` + `Window.min_size` + `user://config.cfg` 记忆。
   界面里给用户一个 `UiScaleOption.new()` 即可。不要把窗口尺寸/缩放写死在业务脚本里。
   **首次运行的窗口尺寸不要依赖 `project.godot` 的 `display/window/size/viewport_*`** ——
@@ -199,6 +226,17 @@ Godot4GUI/
   `Control` 上根本没有 `stretch_ratio` 这个属性，正确的是 `size_flags_stretch_ratio`；
   我用正确属性名实测 **4 个实例、有/无对照都不泄漏**，所以这条没法写进模板当结论。）
 - `Window` 的 `embedded_border`（内嵌对话框的标题栏）**可以**覆盖，但要保留引擎默认的边距：`content_margin_top = 28`（标题栏高度）、`expand_margin_* = 32`（投影留白），只换颜色。边距给小了标题文字会被裁掉 —— 这才是「覆盖后标题栏消失」的真正原因（见 `theme_factory.gd` 的 `embed`）。改成浅色标题栏后必须同时换 `close`/`close_pressed` 图标：引擎默认是白叉，浅底上看不见（已换成 `themes/icons/close*.svg`）。
+- **滚动条的粗细 = 样式盒的最小尺寸**（`content_margin` 左右之和），**给 0 就没有滚动条**：
+  自定义主题里 `ScrollBar` 的 `scroll`/`grabber` 样式盒曾经是 `_sb(..., pad=0)`，
+  实测 `VScrollBar.get_combined_minimum_size()` 就是 `(0, 0)` —— 轨道和滑块都画不出来，
+  整个界面的滚动条成了贴着右缘、抓不住的细痕，而且**画面不报错**。
+  改 `theme_factory.gd` 里那几行时记得：宽度由 `ThemePalette.SCROLLBAR_W` 决定，
+  `tools/checks/scroll_bars.gd` 有断言钉着它。另外没定义的图标会回落到**引擎默认主题**
+  （默认滚动条两端有箭头），本项目用全透明的 `empty.svg` 压掉了。
+- **`resized` 信号可能在 `_ready()` 之前就已经发生过一次**：容器排完版才轮到 ready 通知。
+  所以「在 `_ready()` 里 `resized.connect(...)`」会漏掉那一次，依赖它的布局就一直不对，
+  直到下一次 resize 才归位（本项目的行内按钮踩过：停在 `(0,0)` 且不可见）。
+  在 `_ready()` 末尾补一次 `_on_resized()` 即可。
 - **canvas_item 着色器里 `COLOR` 已经乘过纹理采样**：写 `COLOR = vec4(c, 1.0);` 即可，再乘一次 `COLOR` 会把整幅图压暗。
 - 浮点纹理（`FORMAT_RF`）用 `TEXTURE_FILTER_NEAREST`：逐格显示更像 `pcolormesh`，也避开老 GPU 缺 `OES_texture_float_linear` 的问题。
 - **主题只在「Control 的父链全是 Control/Window」时才生效**：中间夹一个普通 `Node`，其下的控件就拿不到主题（`get_theme_constant` 会返回引擎默认值）。写测试脚本包场景时尤其容易踩。
@@ -214,6 +252,15 @@ Godot4GUI/
 - **更多 Godot 4.7 实测事实**（编码名只认 `gb2312`/`gb18030`、`to_multibyte_char_buffer()` 带结尾 NUL、
   `PopupMenu` 分隔线占下标、`get_theme_color()` 没有默认值重载、`.bat` 的三条硬约束……）：
   见 **`docs/godot-facts-verified.md`**（每条都标了「已验 / 待验 / 已修正」）。
+- **导出模板要「按项目指定」，别共用全局那一份**：不同项目用到的引擎功能不同，模板当然也不同
+  （例如纯 GDScript 项目可以不要 websocket，而本项目需要）。正确做法是在导出预设里用
+  `custom_template/release`（Windows 平台核实过，见 `gdd_1257_EditorExportPlatformWindows.md`）
+  指向**本项目自己那份**模板；`%APPDATA%\Godot\export_templates\` 下那份只是**预设留空时的兜底默认**。
+  **只有一种坑**：预设留空、而全局那份恰好是给别人编的精简版 → 会缺类，且**只在导出后暴露**
+  （编辑器 F5 用的是编辑器本体，与模板无关）。体积实测（官方 104 → 精简 33 MB）、
+  **本项目绝不能关的开关清单**（`websocket`/`svg`/`webp`/`text_server_adv`，以及绝不能用
+  `disable_advanced_gui` —— 它会砍掉 `OptionButton`，而 `UiScaleOption` 正是继承它的）、
+  以及「怎么验证一份模板能不能用」：都在 **`docs/slim-export-template.md`**。
 - **GDScript 的 lambda 按值捕获局部变量**：在 `connect(func(...): ...)` 里给外层的**局部**变量赋值，
   只改到 lambda 自己那份副本，外面看到的还是原值（写信号回调测试时踩过：`var got := []; ...connect(func(...): got = [...]);`
   结果 `got` 永远是空的）。两种正确写法：把结果放到**成员变量**里（`_clicked = [...]`，走 `self` 能写回去），

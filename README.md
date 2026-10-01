@@ -25,8 +25,8 @@
 | 实时折线图 | `TrendChart` | 环形缓冲 + `draw_polyline`，自动/手动 Y 轴 |
 | 多子图折线图 | `MultiTrendChart` | 垂直堆叠、共享 X 轴、各自独立 Y 轴 |
 | 伪彩强度图 | `IntensityMap` | 热力图：坐标轴 + 色标条 + 悬停读数；逐列流式追加，可换配色/伽马/量程 |
-| 数据表 | `DataTable` | 可拖拽调列宽（带双向限位）+ 行内按钮，`Tree` 不支持拖拽 |
-| 树状表格 | `TreeTable` | 层级展开/收起 + 可拖拽调列宽 + 行选中 + 行内按钮；`TreeTableItem` 是行对象 |
+| 数据表 | `DataTable` | 可拖拽调列宽（带双向限位）+ 行内按钮 + **长表内建滚动（表头钉住）**，`Tree` 不支持拖拽 |
+| 树状表格 | `TreeTable` | 层级展开/收起 + 可拖拽调列宽 + 行选中 + 行内按钮 + 内建滚动；`TreeTableItem` 是行对象 |
 | 表格基类 | `ColumnTable` | 列宽拖拽与「单元格按钮」那套机制的公共基类（`DataTable`/`TreeTable` 都继承它） |
 | 文件拖放框 | `FileDropBox` | 圆角虚线外框；拖入文件 = 输入路径，中间按钮调系统文件资源管理器 |
 | 长按按钮 | `LongPressButton` | 防误触（急停 / 启动） |
@@ -37,12 +37,17 @@
 | 带标签输入框 | `LabeledLineEdit` | 标签 + 输入框组合 |
 | 折叠展开 | `ExpandWidget` | 即时展开 / 收起 |
 | 带标题控件组 | `TitledGroup` | 标题 + 内容卡片 |
+| 滚动日志 | `LogView` | 级别配色 / 时间戳 / 来源标签 / 行数上限 / 自动跟随 / 可选中复制 |
 | 堆叠分页 | `StackedContainer` | 多页切换 |
 
 - **WebSocket 前后端通信**：JSON 文本帧，命令 / 采样 / 进度 / 回执 / 逐列图像数据。
 - **后端自动拉起**：`BackendLauncher` 发现连不上后端就自己把 `backend/main.py` 启起来
   （Python 环境与脚本路径**显式配置在 `project.godot` 的 `[backend]` 段**，不做 PATH 自动发现），
   退出时收掉自己起的进程。也可以 `--no-backend-autostart` 关掉，仍按老办法手动开。
+- **多个前端可以同时开着**（后端每个连接一个独立会话，互不干扰）：后端广播在线客户端数，
+  前端只在「自己是最后一个」时才在退出时收掉后端进程；后端自己也会在最后一个客户端离开后
+  （或从头到尾没等到客户端）自动退出，所以不会有孤儿进程占着端口。
+  想禁掉多开就加 `--single-instance`，第二次启动会把已有窗口叫到前面。
 - **窗口 / 缩放适配**：拉伸模式 `disabled`（最大化时**显示更多内容**，而不是把界面整体放大），
   启动时按屏幕 DPI 自动定缩放、设最小窗口尺寸，档位可在界面里选并记忆到 `user://config.cfg`。
 - **色标（colormap）内置**：`rainbow`（与 matplotlib `cmap='rainbow'` **逐点完全一致**）/ `jet` / `gray`，
@@ -137,7 +142,8 @@ Godot4GUI/
 │   │   ├── net_client.gd         # WebSocket 单例（NetClient）
 │   │   ├── theme_manager.gd      # 主题单例（启动时应用全局主题）
 │   │   ├── app_shell.gd          # 窗口尺寸 / DPI 缩放 / user://config.cfg 记忆（AppShell）
-│   │   └── backend_launcher.gd   # 连不上后端就自动拉起后端进程（BackendLauncher）
+│   │   ├── backend_launcher.gd   # 连不上后端就自动拉起后端进程（BackendLauncher）
+│   │   └── instance_guard.gd     # 可选单实例开关（默认关闭）
 │   ├── theme/
 │   │   ├── theme_palette.gd      # 设计令牌（颜色/圆角/字号/间距，唯一可调来源）
 │   │   ├── theme_factory.gd      # 由令牌构建 Theme
@@ -183,8 +189,9 @@ python tools/new_project.py D:\work\MyLab --title "XX 实验台"
 - `{"type":"sample","x":...,"y":...}` — 通用示例采样点（`TrendChart` 演示用）
 - `{"type":"progress","value":...}` — 进度（0..100）
 - `{"type":"ack","id":N,"cmd":...}` — 命令回执
-- `{"type":"hello_ack","server":"godot4gui-backend","version":"..."}` — 对 `hello` 的应答，
+- `{"type":"hello_ack","server":"godot4gui-backend","version":"...","clients":N}` — 对 `hello` 的应答，
   前端据此确认「这个端口上跑的确实是我们的后端」，而不是撞上了别的程序
+- `{"type":"clients","count":N}` — 在线前端数变化时广播；前端靠它判断退出时能否收掉后端进程
 
 前端 → 后端：
 

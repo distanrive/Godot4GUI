@@ -39,6 +39,66 @@
 
 **怎么验的**：`--script` 建 Label 逐个设，打印 `get_combined_minimum_size().x`。
 
+### 1b. 滚动条的粗细**完全由样式盒的最小尺寸决定**，给 0 就没有滚动条 **[已验]**
+
+`ScrollBar` 的 `scroll` / `grabber` 样式盒的 `content_margin` 决定条宽（= 左右 margin 之和）。
+自定义主题里写成 `pad = 0` 的样式盒，实测：
+
+```
+VScrollBar.get_combined_minimum_size() == (0, 0)
+ScrollContainer 内部滚动条宽度 == (0.0, 300.0)      # 可见 = true，但宽 0
+```
+
+也就是说**滚动条存在、只是宽 0**：轨道和滑块都画不出来，屏幕上只剩贴着右缘的一条淡痕，
+抓不住也点不中。最阴的是它**不报任何错**（跑 headless、跑场景都干干净净），
+只有截图放大才看得出来。
+
+本项目据此刻了 `ThemePalette.SCROLLBAR_W`（12px）并把这条钉进 `tools/checks/scroll_bars.gd`。
+
+**顺带一条**：自定义 `Theme` 里**没定义的项会回落到引擎默认主题**，
+所以默认滚动条两端的上下箭头按钮会冒出来（默认主题定义了 `increment`/`decrement`）。
+本项目把它们设成全透明的 `themes/icons/empty.svg` 压掉。
+
+**怎么验的**：`--script` 建 `VScrollBar`，打印 `get_combined_minimum_size()`；
+再开真窗口 `root.get_texture().get_image().save_png()` 截图放大看。
+
+---
+
+### 1c. `resized` 信号可能在 `_ready()` **之前**就已经发生过 **[已验]**
+
+容器（`VBoxContainer` 等）**排完版**才轮到 ready 通知传播，于是：
+
+```gdscript
+func _ready() -> void:
+    resized.connect(_on_resized)     # ← 这一行挂上时，那次 resize 已经过去了
+```
+
+实测打印顺序：先 `resized size=(520, 210)`，**之后**才是 `_ready`。
+后果是「依赖 resize 才摆好的东西一直不对，直到下一次 resize 才归位」——
+本项目的行内按钮就这么踩过：停在 `(0,0)` 且不可见。
+
+**解法**：在 `_ready()` 末尾补一次 `_on_resized()`（幂等的话最省事）。
+
+**怎么验的**：`--script` 里给 `resized` 挂一个打印、再在 `_ready` 里挂一个，看谁先来。
+
+---
+
+### 1d. `clip_contents` 会裁剪**自己的绘制 + 子节点**，但裁剪矩形是**整个控件** **[已验（文档 + 实测）]**
+
+`gdd_0542_CanvasItem.md` / `gdd_0963_Control.md` 原文：clips "CanvasItem based children"，
+且被裁掉的子节点**连输入一起收不到**（本项目截图确认：表体外溢的行确实被切掉了）。
+
+**但它裁不掉「控件内部的某一条带」**：矩形裁剪的边界是控件自身矩形，
+而自绘表格的表头就在这个矩形**里面** —— 所以「往上滚时压进表头带的那半行」裁不掉。
+
+**解法（本项目的做法）**：**表头最后画**，用表头底色盖住那半行。只是把 `draw_*` 换个顺序，
+`_scroll == 0` 时结果与从前逐像素一致。
+
+另外别把 `clip_contents` 和 `CanvasItem.clip_children` 搞混：后者是**alpha 遮罩**那一套
+（文档里「不能嵌套」的警告说的是它），矩形裁剪可以正常嵌套。
+
+---
+
 ### 2. 窗口尺寸：拉伸模式 `disabled` 时 `viewport_*` 是**物理**像素 **[已验]**
 
 `project.godot` 的 `display/window/size/viewport_width/height` **不乘** `content_scale_factor`。
@@ -170,6 +230,26 @@ func _theme_color(name: StringName, fallback: Color) -> Color:
 
 顺带一个有用的细节（同一份文档里写着）：`theme_type` 省略时会用控件的
 **`theme_type_variation`**、否则用类名 —— 这正是 `LongPressButton` 能「跟着语义变体取色」的依据。
+
+---
+
+### 16. `OS.create_process` 的子进程**确实**不随 Godot 退出而结束；但 `_console.exe` 有 wrapper 层 **[已验]**
+
+先记一条被验证的官方说法（`gdd_1387_OS.md` 原文）：
+> Creates a new process that runs independently of Godot. **It will not terminate when Godot terminates.**
+
+实测属实 —— 用**非 console 版**二进制 `Godot_v4.7.2-stable_win64.exe`：
+`taskkill /F` 强杀 Godot 之后，它 `create_process` 拉起的 python 后端**仍然活着**
+（而且这时另一个 WebSocket 客户端还连着，后端按自己的 linger 逻辑把局面收干净）。
+
+**但测试进程归属时有个坑**：`Godot_..._console.exe` 在需要控制台时会把自己**重新拉起一层**
+（于是「后端 python 的父进程」有时候就是那个 wrapper、有时候是它的子进程）。
+实测过一次「杀掉 wrapper 之后它的子孙也一起没了」的现象（像是控制台被关掉、附着在上面的进程收到
+CTRL_CLOSE_EVENT）。
+
+**教训**：写进程生命周期的自动化测试时，**认准真正的 Godot 进程**（= 后端 python 的父进程），
+或者干脆用非 console 版二进制 —— 否则「杀谁」这件事本身就有歧义，得出的结论会互相打架
+（本项目在这上面绕了三圈：先用 console 版得出「Godot 会带走子进程」，换非 console 版才发现不是）。
 
 ---
 

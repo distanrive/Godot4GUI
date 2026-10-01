@@ -112,6 +112,16 @@ const TABLE_ACTION_SEP := 6.0   # 单元格里多个按钮之间的间距（太�
 const PAD_CELL_BUTTON_H := 8.0
 const PAD_CELL_BUTTON_V := 3.0
 
+# ---------- 滚动条（ScrollBar / ScrollContainer / 表格内建滚动） ----------
+# **滚动条的粗细完全由样式盒的最小尺寸决定**（= content_margin 左+右），
+# 所以这一项不能是 0。它曾经等价于 0（theme_factory 里 _sb 的 pad 默认 0），
+# 实测后果是 `VScrollBar.get_combined_minimum_size() == (0, 0)`：
+# 轨道和滑块都画不出来，ScrollContainer 的滚动条只剩贴着右缘的一条细痕，
+# 抓不住也点不中 —— 整个界面的「可滚动」在视觉与交互上都是坏的。
+## 滚动条宽度（同时也是可抓取的最小尺寸）。表格内建滚动条预留的宽度也用它 ——
+## 只有一处真相，免得「预留 14px、实际画 12px」这种对不上的情况。
+const SCROLLBAR_W := 12.0
+
 # ---------- 主题常量（theme constants，均为 int） ----------
 const SEP_BOX := 8            # HBox/VBox 子项间距
 const SEP_GRID := 8           # Grid 间距
@@ -122,12 +132,15 @@ const SEP_SEPARATOR := 4      # 分隔线留白
 const SIDEBAR_W := 320.0        # 左侧参数栏宽度
 const PANEL_MIN_H := 220.0      # 主显示区最小高度
 const TOOLBAR_MIN_H := 28.0     # 工具行最小高度
+const LOG_MIN_H := 132.0        # 日志区（LogView）最小高度——约 6~7 行，够看出趋势
 
 # ---------- 窗口（AppShell autoload） ----------
-# 用户能把窗口拖到的最小尺寸。低于这个值布局会开始互相挤压（参数栏出现滚动条、
-# 伪彩图被压扁），所以交给 AppShell 在启动时设成窗口的 min_size。
-const WINDOW_MIN_W := 1024.0
-const WINDOW_MIN_H := 640.0
+# 用户能把窗口拖到的最小尺寸，交给 AppShell 在启动时设成窗口的 min_size。
+# 比这个值更小也不是不行 —— 页面上有**页面级 ScrollContainer** 兜底（见 main.gd 的 _build_ui），
+# 内容会出滚动条而不是被切掉。但小到一定程度就只剩滚动条可看、没有意义了，
+# 所以这里给一个「还像个工控界面」的下限（原先卡在 1024×640，太保守）。
+const WINDOW_MIN_W := 900.0
+const WINDOW_MIN_H := 560.0
 
 # 首次运行（还没有 user://config.cfg）时的窗口尺寸，单位是**逻辑**像素。
 # 注意 `project.godot` 的 `display/window/size/viewport_*` **不能**当这个用：

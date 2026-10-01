@@ -61,9 +61,15 @@
 |---|---|
 | `TrendChart` / `MultiTrendChart` | 实时折线图（单图 / 多子图共享 X 轴） |
 | `IntensityMap` | 二维标量场伪彩图（坐标轴 + 色标条 + 逐列流式追加 + 悬停读数） |
-| `DataTable` | 可拖拽调列宽的数据表（`Tree` 不支持拖拽）+ 行内按钮 |
+| `DataTable` | 可拖拽调列宽的数据表（`Tree` 不支持拖拽）+ 行内按钮 + 长表内建滚动 |
 | `TreeTable` | 树状表格：层级展开/收起 + 可拖拽调列宽 + 行选中 + 行内按钮（`TreeTableItem` 是行对象） |
+| `LogView` | 滚动日志：级别配色 / 时间戳 / 来源标签 / 行数上限 / 自动跟随 / 可选中复制 |
 | `ColumnTable` | 上两者的公共基类（列宽拖拽 + 单元格按钮机制）；换宽度用 `set_min_width()`，高度由内容自动上报（别去写 `custom_minimum_size.y`，会覆盖掉自动高度） |
+
+表格长起来要滚动就给 `set_max_visible_rows(n)` 或 `set_max_height(px)`：**表头会钉住不动**、
+表体自己出滚动条。**别套外层 `ScrollContainer`** —— 那会把表头一起滚走。不设上限时行为与从前一致。
+日志用 `LogView`（`append(文本, "ok"/"warn"/"error", "来源")`），别用一个 `Label` 反复改 `text`
+—— 那样只看得到最后一条。
 
 行内按钮（「开始 / 暂停 / 删除」这类按行操作）用 `set_row_actions(uid, 列, 规格数组)`
 （树表 `set_item_actions(item, 列, 规格数组)`），发 `cell_action_pressed(uid, index, action)`。
@@ -107,6 +113,9 @@
   注意 `disconnected` 只在**曾经连上过**之后断线时才发；「后端从头到尾没起来」要靠 `connecting` 感知。
 - **后端进程生命周期交给 `BackendLauncher`**：它读 `project.godot` 的 `[backend]` 段
   （`python` / `script` / `autostart` / `kill_on_exit`），连不上就自动拉起，失败时把后端日志尾部摆给用户看。
+  **多个前端可以同时开着**：后端每个连接一个独立会话，会广播 `{"type":"clients","count":N}`，
+  前端只在「自己是最后一个」时才在退出时收掉后端进程；后端自己也会在最后一个客户端离开后
+  （或从头到尾没等到客户端）自动退出，不会有孤儿进程。想禁掉多开用 `--single-instance`。
   不要在业务脚本里自己 `OS.create_process`，也**不要**改成「扫 PATH 找 python」——
   工控机上多版本 Python 是常态，静默挑错解释器只会让后端悄无声息地起不来。
   换机器时改 `[backend] python`，或写到 `user://config.cfg` 的 `[backend]` 段（不动仓库）。

@@ -1,26 +1,40 @@
 # 待办与交接
 
-> 更新：2026-09-21
+> 更新：2026-10-01
 > **新会话从这里读起**：`CLAUDE.md`（开发约定）→ 本文（当前状态 + 待办 + 未决问题）→
-> `docs/new-project-guide.md`（要用本模板起新项目时看）、
-> `docs/gdscript-only-guide.md`（不要 Python 后端时看）。
+> 按需翻这几份参考：`docs/godot-facts-verified.md`（Godot 4.7 实测事实与坑）、
+> `docs/slim-export-template.md`（导出体积 104→33 MB 的配方）、
+> `docs/new-project-guide.md`（起新项目）、`docs/gdscript-only-guide.md`（不要 Python 后端）。
 
 ---
 
 ## 0. 一分钟交接
 
 - **项目现状**：Godot 前端 + Python 后端的工控 GUI 模板已完整可用 ——
-  主题系统、自绘控件库（`scripts/ui/` 共 18 个脚本）、WebSocket 通信骨架与后端自动拉起、
+  主题系统、自绘控件库（`scripts/ui/` 共 19 个脚本）、WebSocket 通信骨架与后端自动拉起、
   窗口/DPI 适配、一个真实数值算例（Rayleigh-Sommerfeld 衍射逐距离刷新）、
   以及「一条命令生成新项目」的脚手架。
-- **最重要的四个入口**：
+- **2026-10-01 这一轮加了什么**（第 35 项，含验证方式）：
+  **滑动条真的能用了**（主题里的 `ScrollBar` 之前是 0px 宽、抓不住的细痕）、
+  新控件 **`LogView`**（滚动日志）、**表格内建滚动**（`set_max_visible_rows()`，表头钉住）、
+  **页面级滚动**（窗口拖小不再切掉内容），以及
+  **多前端与后端生命周期**：允许多个前端共存、后端在最后一个客户端离开后自退
+  （孤儿进程那条限制已修）、另附可选的 `--single-instance`。
+  两条常驻检查：`tools/checks/table_actions.gd`、`tools/checks/scroll_bars.gd`。
+- **最重要的五个入口**：
   - 看控件/改样式：跑 `scenes/gallery.tscn`（无需后端）
   - 看完整链路：跑 `scenes/main.tscn`（F5 即可，后端会自己起来）
   - 不用 Python 的写法：`docs/gdscript-only-guide.md`
   - 「这行为怎么这么怪」：`docs/godot-facts-verified.md`（Godot 4.7 实测事实/坑，每条标了核验状态）
-- **第 2.E 节有几项「已记录待实现」**（状态点控件、便携路径、单实例、导出预设与打包脚本、
-  精简引擎模板配方）—— 来自下游 `wlt_login` 的报告，用户决定后续再挑时间做；
-  每项都写了实现要点和坑，想动手直接从那里看。
+  - **要导出成 exe**：`docs/slim-export-template.md`（体积 104 → 33 MB 的实测与开关清单）
+- **导出模板按项目各自指定**（预设里的 `custom_template/release`），**不要共用全局那一份** ——
+  不同项目用到的引擎功能不同，模板本来就该不一样（纯 GDScript 项目可以不要 websocket，本项目需要）。
+  `%APPDATA%\Godot\export_templates\` 那份只是**预设留空时的兜底默认**；唯一要小心的是
+  「预设留空 + 全局那份是给别人编的精简版」→ 会缺类，且**只在导出后暴露**（F5 用的是编辑器本体）。
+- **第 2.E 节有几项「已记录待实现」**（状态点控件、便携路径、单实例、导出预设与打包脚本）
+  —— 来自下游 `wlt_login` 的报告，用户决定后续再挑时间做；每项都写了实现要点和坑。
+  该节的 **E6「精简引擎模板配方」已经做完了**（实测记录见 `docs/slim-export-template.md`），
+  只剩「`disabled_classes` 类级裁剪」那一半待验证（要编辑器 GUI 生成 profile）。
 - **改自绘控件时，用「自截图 + 放大」验收**（光跑 headless 不报错不代表画对了 —— 表格被裁、
   树线悬空这类问题 headless 一点错都不报）。做法：写个临时 `extends SceneTree` 脚本，
   `root.add_child()` 控件 → `await process_frame` 若干帧 → `root.get_texture().get_image().save_png("user://shot.png")`，
@@ -35,8 +49,9 @@
   因为值等于引擎默认，文件里**看不到**（这是正常的，别去补写回来，编辑器保存一次又会抹掉）。
 - **`docs/godot-facts-verified.md`**：Godot 4.7 的实测事实/坑总集（编码名、Label 最小宽度、
   `StreamPeerTCP.poll`、`.bat` 约束……），每条标了核验状态。遇到「这行为有点怪」先翻它。
-- **git**：截至本文更新，第 1 节 13~28 项**已经提交过了**（用户自行提交），
-  29~32 项（本轮：窗口尺寸 / Switch 禁用 / 长按进度条色 / 事实核验文档）在工作区里。
+- **git**：第 1 节 1~32 项**都已经提交**（用户逐轮自行提交，最新 `393d8b0`）。
+  本文更新时工作区只剩两处**未提交**：`docs/todo.md`（改动）与
+  `docs/slim-export-template.md`（新增，第 33~34 项那份实测记录）。
   新会话接手先 `git status` 确认一下。
 
 ---
@@ -72,6 +87,14 @@
 | 30 | `Switch` 补 `disabled` | 临时脚本 8 条断言：置灰（`modulate.a=0.45`）、光标不是手型、点击无效、恢复后可点 | 全过。`Control` 没有 `disabled`（那是 `BaseButton` 的），自绘控件只能自己补 |
 | 31 | `LongPressButton` 的进度条颜色跟着 `theme_type_variation` 走 | 同上 | 修好：原来写死按 `&"LongPressButton"` 取（主色蓝），套 `DangerButton` 时红底上几乎看不见；现在优先按变体取，`theme_factory` 给实底语义变体定义了半透明白 |
 | 32 | **新增 `docs/godot-facts-verified.md`**：把两份上游报告里的事实**逐条核验**后归档 | 见该文件，每条标了「已验 / 待验 / 已修正」 | 其中 **B8 被订正**（报告说「`clip_text` 不能压小最小宽度」——错，实测 672 → **1**，`overrun != NO_TRIMMING` 同理）；B1/B3/B4/B11/B13 已验属实；B2/B5/B6/B9/B10/B12/B14 标「待验」没有当结论 |
+| 33 | **精简导出模板：两条路线实测对照** | 同一台机、同一份 4.7.2 源码（banner revision `ed1daf0bf` 与官方一致）；用 `wlt_login.pck` 在三种模板下各跑 `--headless --quit-after 240` | 官方 **104.2 MB** / 命令行驱动 **34.0 MB**（1 WARNING）/ `.gdbuild` 驱动 **32.8 MB**（**0 WARNING**）。差异来源与警告成因、完整开关清单、复现步骤见 **`docs/slim-export-template.md`** |
+| 34 | **`build_profile` 的机制核验（读源码，不靠猜）** | `SConstruct:647-658` + `class_db.h` 的 `GD_IS_CLASS_ENABLED` + 生成的 `core/disabled_classes.gen.h` | ① profile 在命令行**之后**应用且**覆盖**它提到的键；② 生成的 `disabled_classes.gen.h` 实测**只有 `#pragma once`** ⇒ **类级裁剪这个杠杆至今没用过**；③ 生成 profile 只有 GUI（编辑器 `--help` 无相关选项），但功能确实在 4.7.2 源码里（`editor_node.cpp:8970`） |
+| 35 | **滚动条支持（2026-10-01 本轮）** | 见下 35a~35e |
+| 35a | 主题滚动条其实是坏的 → 修好 | 临时 `--script` + 真窗口截图：**修前** `VScrollBar.get_combined_minimum_size() == (0, 0)`（轨道/滑块都画不出来，只剩右缘一条 6px 淡痕）；**修后** `(12, 40)`，截图确认轨道+滑块+药丸形滑块都正常。根因：`theme_factory.gd` 里 `ScrollBar` 的样式盒 content_margin 是 0，而**滚动条粗细就等于样式盒的最小尺寸** |
+| 35b | 新控件 `LogView` | `tools/checks/scroll_bars.gd` 里的断言 + 截图：级别配色/时间戳/来源标签/方括号转义/行数上限/清空。过程中修掉一个真 bug：`max_lines` 比 `TRIM_CHUNK` 小时裁剪会算出负下标，**把日志一次清空** |
+| 35c | 表格内建滚动（表头钉住） | 38 条断言 + 逐张截图（滚到顶/中间/底部、半行、按钮跟随、末列留宽）。过程中修掉一个真 bug：**`resized` 信号在 `_ready()` 之前就可能已经发生过**，导致行内按钮停在 `(0,0)` 且不可见 |
+| 35d | 页面级滚动 + 最小窗口下调 | 截图确认：窗口小于内容时整页出滚动条而不是切掉右下角；`WINDOW_MIN` 1024×640 → 900×560 |
+| 35e | **多前端与后端生命周期** | `tools/_tmp_multi_front.py` **15 条断言全过**：强杀前端后第二个客户端不断线、后端不跟着死；最后一个客户端走人后后端 linger 自退；**前端被 `taskkill /F`（`_exit_tree` 来不及跑）后端也自退**（孤儿进程那条限制已修）；「一个客户端都没等到」也有 `--no-client-timeout` 兜底。单实例开关另有一跑：`tools/_tmp_single_instance.py` 4 条断言全过（默认能多开、带开关时第二个实例自己退出且第一个被叫到前面） |
 | 14 | **TreeTable 不泄漏内存** | 同一自检脚本发现「7 ObjectDB instances were leaked at exit」→ 改用 `Object` 显式所有权后重跑 | 泄漏归零。**踩到的坑**：`RefCounted` + 父子互引 = 引用环，引用计数永不回收；且 GDScript **不允许对象在自己的调用栈里 free 自己**（`Attempted to free a locked object`），故 `remove()` 把自己交给表去 `call_deferred("free")` |
 | 15 | **后端自动拉起（端到端）** | 清空端口占用 → 直接 `godot scenes/main.tscn -- --preset=fast --autostart` | 前端自动拉起 python（pid 记录在案）→ `hello_ack` 通过 → 97 列 / 1.5 s 跑完；**退出后端口释放、python 进程数归零**（`kill_on_exit` 生效） |
 | 16 | **脚手架项目也能自动拉起** | 生成新项目 → `--import` → 跑主场景 | `[app] 已连接后端。`，端口随后释放。**这条抓到一个真 bug**：骨架后端原来没有 `--log-file` 参数，argparse 会报 `unrecognized arguments` → 所有新生成项目的自动拉起都会失败（已修，并补上 `hello_ack`） |
@@ -117,10 +140,10 @@
 |---|---|---|
 | E1 | `scripts/ui/status_dot.gd` **状态点**控件 | 自绘一个小圆点；**颜色不要新定义**，直接复用 `StatusIdle`/`StatusOk`/`StatusWarn`/`StatusError` 四个**标签变体**的 `font_color`（用 `get_theme_color("font_color", &"StatusOk")`）—— 这样「状态色唯一定义在 `theme_factory`」这条约束不破。模板现在的状态表达只有文字（`Status*` 标签），缺一个图形化的小指示 |
 | E2 | `scripts/autoload/app_paths.gd` **便携路径助手** | 「优先 exe 同级目录，写不进去再退 `user://`」—— 绿色版/便携版诉求。注意 `AppShell.CONFIG_PATH` 现在是 `const "user://config.cfg"`，**做便携版得把它从编译期常量改成运行期决定**（`AppShell` 与 `BackendLauncher` 的日志路径都要跟着走） |
-| E3 | `scripts/autoload/instance_guard.gd` **单实例** | TCP 端口当锁 + 「再开一次把已有窗口叫到前面」。**坑（他们第一版就是这么整个失效的）**：`StreamPeerTCP.get_status()` **必须先 `poll()` 才更新**，不 poll 会永远停在 `STATUS_CONNECTING`；另外 4.7 里 `poll()` 在父类 `StreamPeerSocket` 上。详见 `docs/godot-facts-verified.md` §3 |
+| E3 | ~~`scripts/autoload/instance_guard.gd` **单实例**~~ | **✅ 已实现（2026-10-01）**：`TCPServer.listen(LOCK_PORT)` 抢锁，抢不到就连过去发 token 请已有实例 `DisplayServer.window_move_to_foreground()`，收到应答才自己退出（拿不到锁≠能退出，那端口也可能是别人的）。**默认关闭**（模板默认允许多开），用 `--single-instance` 或 `[app] single_instance=true` 打开。`poll()` 那个坑按 `docs/godot-facts-verified.md` §3 写的 |
 | E4 | **`export_presets.cfg`**（带注释的最小 Windows 预设） | 模板现在完全没有，每个下游都要在编辑器里手点一遍。注意路径/图标这些别写死成本机绝对路径，否则下游生成即错 |
 | E5 | **打包脚本 `build.bat` + 导出后冒烟测试** | 冒烟测试的价值：headless 跑 N 帧 grep **引擎级 `ERROR`** —— 他们靠它抓到「所有贴图加载失败」，那是**导出日志里完全看不出来**的问题（导出成功、pck 正常，只有运行时才炸）。两个坑：① `.bat` 的三条硬约束见 `docs/godot-facts-verified.md` §5；② **导出后的 release 构建不执行 `--script`**（该文档 §11，待验），所以冒烟测试**不能**靠 `--script`，得跑导出的 exe 本身（如 `--quit-after N`）再 grep 输出 |
-| E6 | **精简引擎模板配方**（~104 MB → ~34 MB） | 只写配方、不编译。必须保留：`module_webp`（**关了所有贴图加载失败**，Godot 的纹理导入内部用 WebP 存 `.ctex`）、`svg`、`text_server_adv`、`freetype`、`glslang`，另留 `opengl3` 兜底 RDP/老核显。工具链 `pip install scons` + `winget install BrechtSanders.WinLibs.POSIX.UCRT --source winget`（不需要 VS；`--source winget` 必须加）。结果指向 `docs/gdscript-only-guide.md` §5 —— 那里已经写了「体积这个现实问题」，配方写好后接上去 |
+| E6 | **精简引擎模板配方**（~104 MB → ~33 MB） | **✅ 配方已实测，见 `docs/slim-export-template.md`**（2026-09-23）。要点：官方 104.2 MB、命令行驱动 34.0 MB、`.gdbuild` 驱动 32.8 MB（同一份源码、同一个 pck 各跑 240 帧）；两者差异来自 core 开关 `disable_physics_2d` 等，且命令行那版会打 `Falling back to dummy PhysicsServer2D` 警告。**还没做的是 `disabled_classes`（类级裁剪）**，那个只有编辑器 GUI 能生成（无 CLI），收益未知。该文档里有完整开关清单（含**本项目绝不能关的 websocket**）、工具链、干跑验证法、探针法 |
 
 > 这几项都是**加法**（新控件 / 新模块 / 新资产），不影响现有功能；E1/E2/E3 是独立小件，
 > E4/E5/E6 属于「工程化资产」，做之前最好先定「模板要不要管打包和单实例」这个取向。
@@ -149,11 +172,13 @@
 ## 3. 已知限制（不是缺陷，但要知道）
 
 1. **默认参数下首次出图约 2 分钟**：物理本身如此（1000 个距离 × 两个 1000×1000 复 FFT）。
-2. **前端被强杀时后端会变成孤儿进程**：`OS.create_process` 起的进程不随父进程结束，
-   正常退出（点关闭/Alt+F4/`--quit-after`）会由 `_exit_tree` 收掉，但 `taskkill /F` 掉 Godot
-   就来不及收。这是 `create_process` 的固有性质，不是 bug；要彻底避免就让后端自己跑成服务
-   （`--no-backend-autostart` + 计划任务）。
+2. ~~**前端被强杀时后端会变成孤儿进程**~~ —— **已修（2026-10-01）**。
+   现在前端拉起的后端带 `--exit-with-last-client`：最后一个客户端走后再等几秒无人连接就自己退出；
+   「一个客户端都没等到」（前端把后端起起来、还没连上就被关掉）另有 `--no-client-timeout` 兜底。
+   实测 `taskkill /F` 掉前端后，后端仍在 linger 内自行退出、端口释放。
+   （`kill_on_exit` 仍然保留：单前端时关窗依然立刻收进程，不用等那几秒。）
 3. **端口上已有后端时前端「只连不管」**：不越权去杀别人的进程，所以那个后端不会被 `kill_on_exit` 收掉。
+   （顺带：这也意味着**多个前端可以同时开**，后端每个连接一个独立 Session、互不共享状态。）
 4. **`PopupMenu` 在无窗口焦点的自动化环境里会立即隐藏**（见 B2）。
 5. **等比显示时上下留白较大**：数据本身是 100 μm × 20 μm（5:1），工具条上的「等比」开关可关掉。
 6. **`docs/plotting-alternatives.md` 里的第三方 addon 链接会随时间失效**，属调研快照。
@@ -197,6 +222,12 @@
 | **`Cell*` 系列变体由 `_add_button_variation()` 连同普通版一起生成** | 普通按钮实测 32px 高、塞进 30px 的行里会顶到分隔线。与其把 `TABLE_ROW_H` 抬到 34（行会变胖、树也变高），不如给按钮做一套紧凑版：只差内边距，所以是同一个函数多传两个参数，不是复制一份样式代码 |
 | **「列宽变了」有两条路，各走一个函数** | `_on_columns_changed()` = 列数/行数变了 → 重算最小尺寸 + 重摆按钮 + 重绘；`_on_widths_changed()` = 只是列宽变了（拖拽中/控件 resize）→ 只重摆按钮 + 重绘。**拖拽刻意不走前者**：每秒上百个 motion 事件都让容器重算最小尺寸是白费（行高不会因为拖列宽而变）。这个拆分是被 DeepScribe 那个 bug 逼出来的 —— 原先两者混在一起，`_on_columns_changed()` 又漏了重绘，于是拖拽分支自己写 `queue_redraw()` 却忘了重摆按钮 |
 | **给模板加常驻回归检查（`tools/checks/`）** | 这次那个 bug 我自己的 17 条断言**没抓到** —— 因为它们只覆盖 `set_columns()`/`resized` 两条路，没盖拖拽。自绘控件的这类问题「跑场景不报错、断言写歪了也看不出来」，值得有个能一键跑的钉子。约定：`extends SceneTree` + `--script` 跑、失败用非零退出码、断言里写清「怎么算出来的」（见该文件头部注释） |
+| **精简导出模板用 `.gdbuild`（build_profile）而不是命令行/`custom.py`** | 三者都只是给 SCons 递参数，但 profile 多两样：① 能裁**类**（命令行与 `custom.py` 都做不到）；② 由同版本编辑器生成、能跟工程进版本控制，不会选项名漂移。**代价**：生成必须点 GUI（无 CLI），且它**覆盖**命令行同名选项（`SConstruct:647`），所以「profile 与命令行冲突时 profile 赢」这条必须记住 |
+| **导出模板「按项目指定」，不共用全局那份** | 不同项目用到的引擎功能不同，模板当然不一样（wlt_login 是纯 GDScript、只用 `HTTPRequest`，所以它那份不带 websocket 是对的；本项目需要 WebSocket）。机制是预设里的 `custom_template/release` / `custom_template/debug`（Windows 平台已核实，见 `gdd_1257_EditorExportPlatformWindows.md`，留空才用全局默认）。**教训**：我一度把「全局那份没有 websocket」当成缺陷、反复提醒「换回官方」，那是错的框架 —— 正确做法是每个项目指自己那份，谁也不影响谁 |
+| **多前端：默认允许共存，靠「后端自退」而不是「前端互杀」来收尾** | 后端本来就是「每个连接一个独立 Session」，共存没有共享状态的麻烦；真正的耦合只有「谁拉起的、谁退出时杀」。所以：① 后端广播在线客户端数，前端**只在自己是最后一个时**才收进程；② 后端带 `--exit-with-last-client`，最后一个客户端走后就自己退。选 ② 而不是「前端互相同步谁该杀」是因为**进程自己最清楚什么时候没人要它了**，而且它同时兜住前端被强杀（`_exit_tree` 都来不及跑）的情况。单实例被做成**可选开关**而不是默认：工控场景里「多屏各开一个视图」是合理需求，默认禁掉反而是替用户做决定 |
+| **表格内建滚动而不是让调用方套 `ScrollContainer`** | 套外层滚动会把**表头一起滚走** —— 长表滚起来就不知道哪列是哪列了。自绘表格有能力把表头钉住，那就该钉。代价是滚动偏移要同时补偿四条线（绘制、行命中、行内按钮、高度契约），所以特意定了三条不变量并配了常驻检查（见 `column_table.gd` 文件头） |
+| **滚动条粗细 = 样式盒最小尺寸，所以不能用 `pad=0` 的样式盒** | 这是个「画面不报错、只是不能用」的缺陷（实测 `(0,0)`）。把机制写进 `ThemePalette.SCROLLBAR_W` 的注释 + `scroll_bars.gd` 的断言，是因为它**改主题就会悄悄复发** |
+| **`disabled_classes` 不手写** | 它靠「扫工程反推用到的类」，官方明列盲区（动态构造的 GDScript、表达式里的用法、GDExtension、外部 pck），漏一个是运行时崩。收益未知但风险实在 —— 要用就让编辑器 detect 生成，且必须配导出后冒烟测 |
 
 ---
 
@@ -239,6 +270,7 @@ PY="C:\Users\YH\.conda\envs\normal\python.exe"
 
 # ---- 常驻回归检查（改控件/表格后必跑，失败会返回非零退出码）----
 "$GODOT" --headless --path . --script res://tools/checks/table_actions.gd
+"$GODOT" --headless --path . --script res://tools/checks/scroll_bars.gd
 #   期望输出 [check] PASS、退出码 0
 
 # ---- 起新项目 ----
@@ -264,3 +296,8 @@ taskkill /F /PID <pid>
    headless 不报错不代表画对了（表格被裁、树线悬空这类问题它一声不响）。
 7. **改了表格（列宽/行结构/行内按钮）**：跑 `tools/checks/table_actions.gd`，要看到 `[check] PASS`。
    它在**未修 bug 时会真的失败**（反向验证过：退出码 1 + 打印实际位移），不是走过场。
+8. **改了滚动条 / 表格内建滚动 / `LogView` / 主题里的 `ScrollBar`**：跑
+   `tools/checks/scroll_bars.gd`（38 条断言，钉住「滚动条不能又变成 0px」等几条）。
+9. **改了后端生命周期 / 多前端相关**：跑 `tools/_tmp_multi_front.py` 那种场景（**该脚本是临时件、
+   跑完即删，需要时按第 35e 项的描述重写**）：强杀前端后第二个客户端不能断、后端要自己退出；
+   另外要确认**退出后 `netstat` 里 8765 已释放**。
