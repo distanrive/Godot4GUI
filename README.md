@@ -39,6 +39,7 @@
 | 带标题控件组 | `TitledGroup` | 标题 + 内容卡片 |
 | 滚动日志 | `LogView` | 级别配色 / 时间戳 / 来源标签 / 行数上限 / 自动跟随 / 可选中复制 |
 | 堆叠分页 | `StackedContainer` | 多页切换 |
+| 托盘隐藏 | `TrayWindow` | 把主窗口**从任务栏和 Alt+Tab 上真的藏起来**。Godot 自己做不到（见 `docs/godot-facts-verified.md` §17），模板为此带了一份约 300 行、**手写 C 且不依赖 godot-cpp** 的 GDExtension；缺 dll 时 `available()` 返回 false，业务侧退回最小化 |
 
 - **WebSocket 前后端通信**：JSON 文本帧，命令 / 采样 / 进度 / 回执 / 逐列图像数据。
 - **后端自动拉起**：`BackendLauncher` 发现连不上后端就自己把 `backend/main.py` 启起来
@@ -54,6 +55,11 @@
   定义在 `scripts/theme/colormaps.gd`，由 `themes/shaders/colormap.gdshader` 在 GPU 上查表上色。
 - 渲染器用 `forward_plus` + 默认的 `vulkan` 驱动（Windows 上**不用** d3d12，那对新机器以外都太新），
   为后续 3D 图表留路；老机器可一键回退到 `gl_compatibility`，见下面「老旧配置」。
+- **托盘隐藏是真的隐藏**：`TrayWindow.hide()` 之后窗口从任务栏和 Alt+Tab 上一起消失
+  （不是最小化）。这靠模板自带的一份 GDExtension 绕过引擎调 Win32 的 `ShowWindow` ——
+  因为 Godot 的主窗口**恒定**带 `WS_EX_APPWINDOW`，纯 GDScript 做不到。
+  **分发时 `bin/native_window.windows.x86_64.dll` 要和 exe 放在一起**：漏了不报错，
+  只是关窗时静默退化成最小化。自查：`godot --path . --script res://tools/checks/tray_window.gd`。
 
 ## 技术栈与版本
 

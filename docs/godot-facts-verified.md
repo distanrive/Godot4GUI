@@ -99,6 +99,68 @@ func _ready() -> void:
 
 ---
 
+### 1e. `GridContainer` 的余量分配**不看 `size_flags_stretch_ratio`** **[已验（源码 + 实测）]**
+
+`GridContainer::_update_grid()` 对可扩展列就是一句
+`remaining_space.width / col_expanded.size()` —— **平均分**，
+你把 `size_flags_stretch_ratio` 设成 1:2:3 也一点用没有。
+想按比例分宽度得用 `HBoxContainer`（它认 ratio）。
+
+更反直觉的是**挤不下时会「钉死」某一列**：它先假定均分，如果某一列的固有最小宽度
+大于「剩余空间 ÷ 可扩展列数」，那一列就被移出可扩展集合、按**它的最小值**固定下来，
+剩下的宽度**全给另一列**。
+
+实测（两列网格、可用宽 1268、缝 12）：左列最小 400，右列最小 814
+（= 网络卡 402 + 缝 12 + 运行状态卡 400）→ 814 > 1256/2 = 628，
+于是右列被钉死在 814，左列拿走剩下的 **442**。三张卡变成 442｜402｜400 ——
+左列反而最宽，跟想要的「三列大致等宽」正好相反。
+
+**解法**：想让某一列是固定宽度、其余全给另一边，就**别给那一列的单元格设 `SIZE_EXPAND`**
+（不设 EXPAND 的列按最小值走，余量全归可扩展列）。本模板据此拿到 400｜422｜422。
+
+**怎么验的**：`--script` 里建网格 → 打印 `get_combined_minimum_size()` 与各子节点的 `size`，
+改一个标志位再打一次对照。
+
+---
+
+### 1f. `popup_on_parent()` 要的是**全局坐标**，不是父控件的局部坐标 **[已验]**
+
+给表格加行级右键菜单时最容易想当然的一条：把 `PopupMenu` 挂成某个 `Control` 的子节点，
+就以为 `popup_on_parent(Rect2(控件内局部坐标, Vector2.ZERO))` 是相对那个控件定位的。
+**不是。**
+
+官方文档原话（`Window.popup_on_parent`）：
+
+> Popups the Window with a position shifted by parent **Window's** position.
+> If the Window is embedded, has the same effect as `popup()`.
+
+而 `popup()` 的说明写着 "rect must be in global coordinates"（单窗口模式下 = 相对
+**主窗口左上角**）。两句合起来：**嵌入子窗口时 `popup_on_parent` 就是 `popup`，
+坐标按主窗口算** —— 「父亲是 Control」和「坐标相对谁」是两回事，这是最容易搞混的地方。
+
+实测（宿主控件放在 220px 占位 + 16px 页边距之后，模拟「左边有侧边栏」；
+控件内点击位置 `(320, 75)`）：
+
+| 传什么 | 菜单实际落在 | 偏差 |
+|---|---|---|
+| `Rect2(Vector2(320, 75), Vector2.ZERO)` | `(320, 75)` | **向左偏 244px**（= 宿主控件的全局 x） |
+| `Rect2(host.get_global_position() + Vector2(320, 75), Vector2.ZERO)` | `(564, 99)` | **0, 0** |
+
+症状就是「菜单弹出来离鼠标偏出去一大截」，且偏差**恰好等于那个控件的全局 x**
+—— 贴着原点摆的控件会碰巧通过，所以写复现时**宿主必须有非零偏移**。
+
+写法上有个好处：嵌入式弹窗的「主窗口左上角」正好等于 `Control.get_global_position()`
+的原点，而非嵌入模式下 `popup_on_parent` 又会补上父窗口的位置，
+所以 `host.get_global_position() + 控件内坐标` 这一种写法**两种模式都对**。
+
+**顺带一条**：嵌入弹窗会被引擎**自动收进视口**，靠边时不用自己 clamp ——
+请求 `(1590, 1190)` 实际落在 `(1516, 996)`，右下边缘恰好贴住 1600×1200 视口。
+
+**怎么验的**：`--script` 建一个带非零全局偏移的 `Control`，把 `PopupMenu` 挂上去，
+按上面两种写法各弹一次，打印 `menu.position` 与期望位置的差。
+
+---
+
 ### 2. 窗口尺寸：拉伸模式 `disabled` 时 `viewport_*` 是**物理**像素 **[已验]**
 
 `project.godot` 的 `display/window/size/viewport_width/height` **不乘** `content_scale_factor`。
@@ -253,6 +315,26 @@ CTRL_CLOSE_EVENT）。
 
 ---
 
+### 16b. `brotli=no` 会让**所有内置字体加载失败**（编译期开关的隐性依赖） **[已验]**
+
+Godot 的内置字体**全是 WOFF2**：`thirdparty/fonts/` 下的 `Inter_Regular/Inter_Bold`
+（默认 UI 字体）与 `DroidSansFallback`（**中文兜底字体**），
+而 WOFF2 解压靠 FreeType + brotli（`modules/text_server_adv/SCsub` 里的
+`FT_CONFIG_OPTION_USE_BROTLI`）。
+
+关掉 `brotli` 之后两种字体都解不出来，文字**静默退化成 Windows 系统字体**：
+英文与数字变衬线体（Times 那一路）、中文变宋体式的细笔画，界面整体「字变小了、变淡了」，
+而**日志里一行错都不报**。这一项只占 **0.3 MB**，不值得省。
+
+**症状与 `module_webp_enabled=no` 是同一类**（贴图导入内部用 WebP 存 `.ctex`，
+关掉后所有贴图加载失败）。教训：**「看着用不到」的第三方库可能是引擎内部的依赖**
+（编码器/解码器这类尤其危险），砍之前先在真机上跑一遍、并且**用眼睛看**。
+
+**怎么验的**：同一台机器、同一个窗口、同一块区域，用两种模板各导一次 exe、截图逐像素比 ——
+衬线体 vs 黑体一眼就能分出来。
+
+---
+
 ## 五、Windows `.bat` 打包脚本的三条硬约束 **[待验，报告来源]**
 
 写过的都撞过（报告者说三条全撞了）：
@@ -264,6 +346,94 @@ CTRL_CLOSE_EVENT）。
    后面的文字被当命令执行（报 `not was unexpected at this time`）。
 3. **`call` 用全路径**：某些环境（比如从 Git Bash 启动的 cmd）会设
    `NoDefaultCurrentDirectoryInExePath=1`，裸文件名直接找不到。
+
+---
+
+## 六、窗口与托盘（Windows）
+
+### 17. `Window.hide()` 对**主窗口必然失败**，任务栏按钮也去不掉 **[已验（源码 + 实测）]**
+
+```
+ERROR: Can't change visibility of main window.
+   at: set_visible (scene/main/window.cpp:1017)
+```
+
+`Window::set_visible()` 里第一件事就是
+`ERR_FAIL_NULL_MSG(get_parent(), "Can't change visibility of main window.")` ——
+主窗口就是 `get_tree().root`，**没有父节点**，所以这一句必然命中。另外三条证据：
+
+- `DisplayServer` 根本没有 hide 类接口，最接近的只有 `window_set_mode(MINIMIZED)`；
+- Windows 后端 `_get_window_style()` 给主窗口**恒定**加 `WS_EX_APPWINDOW` ——
+  那正是「必须出现在任务栏」的标志；只有窗口带外部父 HWND（编辑器内嵌游戏那条路）时才跳过；
+- `WINDOW_FLAG_POPUP` 明确拒绝主窗口（`Main window can't be popup.`）。
+
+**所以「关窗后只剩托盘图标、任务栏不留按钮」用纯 GDScript 做不到**，
+只能拿 `DisplayServer.window_get_native_handle(WINDOW_HANDLE)` 的 HWND
+绕过引擎调 Win32 的 `ShowWindow(hwnd, SW_HIDE)`。本模板为此带了一份极小的 GDExtension
+（`tools/native_window/`），GDScript 侧封装见 `scripts/util/tray_window.gd`。
+
+**一个被它坑到的写法**：`win.hide()` 之后读 `win.visible` 判断成没成功。
+`hide()` 每一次都失败，于是**每一次**都会走进「隐藏失败」分支、打一条
+「当前平台无法隐藏窗口」的警告 —— 那条警告看着像偶发故障，其实描述的是必然结果。
+
+### 18. `render_target_update_mode` 只注册在 `SubViewport` 上 **[已验（源码 + 实测）]**
+
+`UpdateMode` 枚举**声明**在 `viewport.h`，很容易以为根窗口也能用 —— 但
+`ADD_PROPERTY("render_target_update_mode", ...)` 和 `BIND_ENUM_CONSTANT(UPDATE_*)`
+都写在 `SubViewport::_bind_methods()` 里（`scene/main/viewport.cpp`）。
+
+后果：`Viewport.UPDATE_DISABLED` **连解析都过不去**
+（`Parse Error: Cannot find member "UPDATE_DISABLED" in base "Viewport"`），
+写成整数去 `set()` 则是运行时报错。
+
+**「藏起来之后别一直渲染」怎么办**：用 `Engine.max_fps` 把主循环憋住。
+本模板压到 10 —— 不压到 1 是因为托盘菜单也是 Godot 画的，1fps 下要等一秒才弹出来。
+计时器 / 协程 / 网络轮询走的是真实时间，不受影响。
+
+---
+
+## 七、GDExtension（写原生扩展时）
+
+本模板带了一份**手写的 C 扩展**（`tools/native_window/`，约 300 行，**不依赖 godot-cpp**）——
+只包两个函数，为一个 `ShowWindow` 拉一整套 C++ 绑定（几百 MB 仓库 + 一次长编译）不划算。
+下面几条都是写它的时候撞出来的。
+
+### 19. `GDExtensionPropertyInfo.class_name` **不能给 NULL** **[已验（崩溃复现）]**
+
+头文件里它是个 `GDExtensionStringNamePtr`，看着「没有类」就该填 NULL ——
+但 Godot 侧的 `PropertyInfo(const GDExtensionPropertyInfo &)` 是**无条件解引用**的：
+
+```cpp
+class_name = *reinterpret_cast<const StringName *>(pinfo.class_name);
+```
+
+给 NULL 就是一次空指针解引用，表现为**加载扩展时整个进程 signal 11 崩溃**，
+而且崩在 Godot 自己的代码里、**堆栈没有符号**（`-- END OF C++ BACKTRACE --` 之后是空的），
+极难定位。正确做法是传一个**空的 StringName**。`hint_string` 同理（要空的 `String`，不是 NULL）。
+
+### 20. `.gdextension` 不被扫到就**静默不加载** **[已验]**
+
+Godot 运行期是从 `.godot/extension_list.cfg` 读扩展清单的，而那个文件由
+**编辑器扫描工程时**生成。往工程里新放一个 `.gdextension` 之后如果不跑一次 `--import`
+（或开一次编辑器），`ClassDB.class_exists("YourClass")` 永远是 false，
+而且**一句报错都没有**。新增带 `class_name` 的脚本同理（表现为 `Identifier not declared`）。
+
+反过来，**清单在、dll 不在**时每次启动会打三行 ERROR
+（`GDExtension dynamic library not found`）—— 功能会优雅降级，但控制台一直是脏的。
+所以本模板把那个 58 KB 的 `bin/*.dll` **提交进仓库**。
+
+### 21. `ClassDB.class_call_static()` 是「缺 dll 也不炸」的关键 **[已验]**
+
+```gdscript
+# ✗ dll 一缺失，**整个脚本编译不过**，连降级的机会都没有
+NativeWindow.hide_window(hwnd)
+
+# ✓ 类不在时 class_exists 返回 false，可以优雅退回「最小化到任务栏」
+if ClassDB.class_exists(&"NativeWindow"):
+    ClassDB.class_call_static(&"NativeWindow", &"hide_window", hwnd)
+```
+
+业务脚本里**一律用动态写法**。一次关窗查一次 ClassDB，性能上完全无所谓。
 
 ---
 

@@ -44,7 +44,8 @@ python backend/main.py
 │   ├── autoload/        # NetClient（WebSocket 单例）/ ThemeManager（主题）
 │   ├── theme/           # 设计令牌 + 主题工厂 + 色标
 │   ├── ui/              # 可复用控件（class_name）
-│   └── util/fmt.gd      # 数字格式化
+│   └── util/            # fmt.gd（数字格式化）/ tray_window.gd（托盘隐藏）
+├── bin/                 # 原生窗口扩展的 dll —— **跟 exe 一起分发**，漏了会静默降级成最小化
 ├── themes/              # 图标 SVG + 伪彩着色器
 ├── backend/             # WebSocket 服务 + 业务计算
 └── docs/                # 协议/设计文档放这里

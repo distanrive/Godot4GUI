@@ -36,6 +36,10 @@ COPY_DIRS = [
     "scripts/ui",
     "scripts/util",
     "themes",
+    # 原生窗口扩展的产物（*.dll）。**它必须跟着仓库走**：清单在、库文件不在的话，
+    # Godot 每次启动都会打三行 `GDExtension dynamic library not found`
+    #（功能会优雅降级成最小化，但控制台一直脏）。见 native_window.gdextension 的注释。
+    "bin",
 ]
 # 原样复制的散文件（project.godot 会再按新名字改几个字段）
 COPY_FILES = [
@@ -49,6 +53,16 @@ COPY_FILES = [
     #   godot --headless --path . --script res://tools/checks/scroll_bars.gd
     "tools/checks/table_actions.gd",
     "tools/checks/scroll_bars.gd",
+    # 这一条要**窗口模式**跑（headless 下会跳过整块）：
+    #   godot --path . --script res://tools/checks/tray_window.gd
+    "tools/checks/tray_window.gd",
+    # 原生窗口扩展（把主窗口从任务栏上真的藏起来，Godot 自己做不到）：
+    # 清单 + 源码 + vendored 接口头 + 编译脚本。用法见 scripts/util/tray_window.gd。
+    # 单独编它：bash tools/build_native_window.sh（需要 MinGW gcc）
+    "native_window.gdextension",
+    "tools/build_native_window.sh",
+    "tools/native_window/native_window.c",
+    "tools/native_window/gdextension_interface.h",
 ]
 # gallery（开发期参照手册）：--no-gallery 时不拷
 GALLERY_FILES = [

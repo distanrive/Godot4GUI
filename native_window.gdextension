@@ -1,0 +1,30 @@
+; 原生窗口扩展的清单 —— Godot 靠扫描 res:// 下的 *.gdextension 发现它。
+;
+; 它只干一件事：把主窗口**从任务栏和 Alt+Tab 上真的藏起来**（以及再叫回来）。
+; Godot 自己的 API 做不到，理由写在 tools/native_window/native_window.c 顶部。
+;
+; 目录约定：
+;   tools/native_window/native_window.c   源码（tools/ 不进导出版）
+;   tools/build_native_window.sh          编译脚本（MinGW gcc）
+;   bin/native_window.windows.x86_64.dll  产物，**提交进仓库**
+;
+; 三个 feature 标签都指同一个 dll：
+;   editor  = 编辑器里按 F5（编辑器本体）
+;   debug   = 导出 debug 版
+;   release = 导出 release 版
+; 这个 dll 是纯 C、没有调试/发布之分，所以三处共用一个文件。
+;
+; **dll 必须跟着仓库走**：清单在、库文件不在的话，Godot 每次启动都会打三行
+; `GDExtension dynamic library not found`（功能会优雅降级成最小化，但控制台一直脏）。
+
+[configuration]
+
+entry_symbol = "godot4gui_native_window_init"
+compatibility_minimum = "4.7"
+reloadable = false
+
+[libraries]
+
+windows.editor.x86_64 = "res://bin/native_window.windows.x86_64.dll"
+windows.debug.x86_64 = "res://bin/native_window.windows.x86_64.dll"
+windows.release.x86_64 = "res://bin/native_window.windows.x86_64.dll"

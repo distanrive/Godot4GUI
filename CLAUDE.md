@@ -29,6 +29,9 @@
 ```
 Godot4GUI/
 ├── project.godot                 # 工程配置 + autoload + [backend] 段（渲染器 forward_plus + vulkan，见「技术栈」）
+├── native_window.gdextension     # 原生窗口扩展的清单（把主窗口从任务栏上真的藏起来，见「托盘与窗口」）
+├── bin/
+│   └── native_window.windows.x86_64.dll   # 上面那份扩展的产物，**提交进仓库**（缺了 Godot 每次启动打三行 ERROR）
 ├── scenes/
 │   ├── main.tscn                 # 应用 Demo（默认主场景，挂 main.gd）：Rayleigh-Sommerfeld 衍射模拟
 │   └── gallery.tscn              # 控件/布局总览，挂 gallery.gd
@@ -65,7 +68,9 @@ Godot4GUI/
 │   │   ├── titled_group.gd          # 带标题控件组 TitledGroup
 │   │   ├── log_view.gd              # 滚动日志 LogView（级别配色/行数上限/自动跟随/可复制）
 │   │   └── stacked_container.gd     # 堆叠分页 StackedContainer
-│   └── util/fmt.gd               # 数字格式化 Fmt（GDScript 的 % 不支持 %e/%g）
+│   └── util/
+│       ├── fmt.gd                # 数字格式化 Fmt（GDScript 的 % 不支持 %e/%g）
+│       └── tray_window.gd        # 托盘隐藏 TrayWindow（封装原生扩展，见「托盘与窗口」）
 ├── themes/
 │   ├── icons/                    # 复选/箭头/滑块/关闭等图标（SVG）
 │   └── shaders/colormap.gdshader # 伪彩着色器：强度纹理 → 色标（GPU 上色）
@@ -75,7 +80,10 @@ Godot4GUI/
 │   └── requirements.txt
 ├── tools/
 │   ├── new_project.py            # 脚手架：以本模板生成新项目（生成即可 F5 跑通）
+│   ├── build_native_window.sh    # 编译原生窗口扩展（需要 MinGW gcc）
+│   ├── native_window/            # 那份扩展的 C 源码 + vendored 的 GDExtension 接口头
 │   ├── checks/                   # 常驻回归检查（headless 一条命令跑，失败返回非零退出码）
+│   │   └── tray_window.gd        # （这一条要**窗口模式**跑，headless 下会跳过）
 │   └── skeleton/                 # 新项目的起始页面/后端骨架/README/CLAUDE 模板（含 .gdignore）
 └── docs/
     ├── new-project-guide.md        # 【起新项目看这篇】完整开发指引
@@ -205,6 +213,19 @@ Godot4GUI/
 - `Tree` 不支持拖拽调列宽（只有 `get_column_width()` 只读），要可调列宽的数据表用本项目 `DataTable`。
 - 闪烁/报警用 `FlashLabel`：先把文字设成报警色，再对 `modulate.a` 做透明度闪烁；不要用 `modulate` 改颜色（会把深色文字越乘越暗）。
 - 页面边距由 `MarginContainer` 的主题默认值控制，改 `theme_palette.gd` 的 `PAGE_MARGIN` 一处即可统一调整。
+- **仪表盘式布局：两列要「接缝对齐」，就让它们共用一个 `GridContainer`，别用左右两个 VBox。**
+  两个独立 VBox 各自堆卡片时，接缝位置取决于各自内容的高度，差几像素一眼就看得出来。
+  共用一个网格后**一行的高度由两列里较高的那个决定**，接缝天然落在同一条横线上。
+  Godot 的 `GridContainer` **不支持跨格** —— 需要「3×3 里某块占右下 2×2」这类排布时，
+  用**嵌套**等价实现（外层 2 列网格，某一格再塞一个 HBox/VBox），几何完全一致。
+  两条反直觉的分配规则见 `godot-facts-verified.md` §1e。
+- **卡片列的最后一张要 `size_flags_vertical = SIZE_EXPAND_FILL`**：网格把这一列拉高之后，
+  没人接手的余高会留在**卡片外面**，表现为「这一列的底边比邻列差一截」。
+  让最后一张卡长起来，余白就移到卡片内部（和被撑高的其它卡片表现一致）。
+- **整页套一层 `ScrollContainer` 兜底**（窗口比内容小时整体滚动、两行一起动）。
+  横向用 `AUTO` 而不是 `DISABLED` —— 这类界面的固有最小宽度常常一千多像素
+  （一个长选项名就能顶到 400px），屏幕小/缩放大的机器上出横向滚动条总比把右边裁掉强。
+  **但别给某一列单独套 `ScrollContainer`**：那就成了「一边滚一边不动」，接缝立刻错开。
 - **窗口标题要用 `AppShell.set_window_title()`**，别直接写 `get_window().title`。
   开发期用编辑器那套二进制跑工程时，标题会带个 ` (DEBUG)` 后缀，看着像没编译完；要去掉它必须两步都对
   （2026-09-22 在 Godot 4.7.2 / Windows 上实测）：
@@ -298,3 +319,69 @@ Godot4GUI/
   界面上必须把换算结果实时显示出来（`main.gd` 的 `_update_step_hint()`），否则光看数字没人知道它意味着多少 μm。
   另外算 z 序列长度要用 **`ceil((z_max-z_min)/dx) + 1`** 对齐 numpy 的 `arange(z_min, z_max+dx, dx)`；
   用 `floor` 会差一个元素（实测 N=384 时差 1 列，画布就对不上了）。
+
+## 托盘与窗口（原生扩展）
+
+「关窗后只剩托盘图标、任务栏上不留按钮」这件事 **Godot 自己做不到**：
+主窗口（`get_tree().root`）没有父节点，`Window::set_visible()` 会直接命中
+`ERR_FAIL_NULL_MSG(get_parent(), ...)`；`DisplayServer` 也没有任何 hide 接口；
+Windows 后端还给它**恒定**加了 `WS_EX_APPWINDOW`（= 必须出现在任务栏）。
+完整证据链见 `docs/godot-facts-verified.md` 的 §17。
+
+所以模板自带一份**极小的 GDExtension**，绕过引擎直接调 Win32 的 `ShowWindow`：
+
+| 文件 | 作用 |
+| --- | --- |
+| `tools/native_window/native_window.c` | 全部实现，约 300 行，**手写 C、不依赖 godot-cpp** |
+| `tools/native_window/gdextension_interface.h` | 从 Godot 源码 vendored 的接口头（**与引擎版本绑定**） |
+| `tools/build_native_window.sh` | 用 MinGW gcc 编成 `bin/*.dll`（加 `-Wl,--no-insert-timestamp`，产物可复现） |
+| `bin/native_window.windows.x86_64.dll` | 产物，**提交进仓库**（58 KB） |
+| `native_window.gdextension` | 清单（Godot 靠扫它发现扩展） |
+| `scripts/util/tray_window.gd` | GDScript 侧封装 `TrayWindow` |
+
+用法（业务侧只需要认 `TrayWindow`）：
+
+```gdscript
+if TrayWindow.available():     # 缺 dll 时返回 false
+    TrayWindow.hide()          # 关窗时：真的藏起来（任务栏和 Alt+Tab 都没有它）
+else:
+    get_window().mode = Window.MODE_MINIMIZED   # 退回最小化
+# 点托盘图标 / 托盘菜单「显示主界面」时：
+TrayWindow.restore()
+```
+
+**五条要求**（都是踩出来的）：
+
+- **`available()` 一定要判**。缺 dll 时它返回 false，业务侧要退回「最小化到任务栏」；
+  不判的话用户点关闭会以为程序退出了，其实它只是看不见。
+- **一律用 `ClassDB.class_call_static()` 动态调**（`TrayWindow` 内部就是这么写的），
+  别在业务脚本里直接写 `NativeWindow.hide_window(...)` ——
+  那样 dll 一缺失就是**整个脚本编译不过**，连降级的机会都没有。
+- **隐藏期间 `TrayWindow` 会把 `Engine.max_fps` 压到 10**：Godot 并不知道窗口没了，
+  照常按 60fps 渲染，一个待在托盘里待机一整天的程序没必要一直烤 GPU。
+  恢复时自动还原。**别想着用 `render_target_update_mode` 停渲染** —— 那个属性只注册在
+  `SubViewport` 上（见 `godot-facts-verified.md` §18）。
+- **打包时 `bin/native_window.windows.x86_64.dll` 必须跟 exe 放一起**。
+  漏了不报错，只是功能静默降级成最小化 —— 这种「静默」是最难被发现的。
+- **改了扩展之后**：`bash tools/build_native_window.sh` → `godot --headless --path . --import`
+  （新增 `.gdextension` / `class_name` 之后不刷这一步，`class_exists` 永远是 false **且一句错都不报**）
+  → `godot --path . --script res://tools/checks/tray_window.gd`
+  （**要用窗口模式跑**，headless 下那一整块会被跳过）。
+
+两份现成的参照：`gallery` 的「窗口与托盘」分区有个「隐藏 3 秒自动回来」的演示；
+`tools/checks/tray_window.gd` 用**临时窗口**真的隐藏/显示一次并断言 `IsWindowVisible`。
+
+## 验证时别骗自己（三条实测教训）
+
+这三条都是在真实开发里被坑出来的：**验证跑过了，但验证本身是无效的**。
+
+1. **单实例守卫会让自动化验证静默短路。** 之前留了一个实例在跑，之后所有「带守卫」的
+   验证都在 1 秒内 `quit(0)`、**零报错** —— 看起来全通过，其实一行业务代码都没执行。
+   写自动化验证前先确认锁端口空闲，或者干脆加 `--no-instance-guard`。
+2. **轮询协程忘了 `start()` 是 `--quit-after` 查不出来的。** 一个「配置读得对、记账逻辑写得好、
+   界面也齐，就是没有任何东西在轮询」的定时功能，跑多少帧都不报错 ——
+   只有把时间设到一分钟之后、**真等它响一次**才能发现（本项目就漏过一次 `_scheduler.start()`）。
+3. **改过导出模板 / 类裁剪，只能用导出版验证。** 编辑器跑的是**编辑器本体**（自带全部类），
+   所以 `--import`、跑 `gallery`、`--quit-after` 全都证明不了模板是好的。
+   必须导出后跑真实 exe（冒烟测 + 手动走一遍界面）。
+   最容易漏的是「只出现在冷分支里的类」—— 本项目那条是**定时指令的倒计时对话框**。

@@ -129,12 +129,13 @@
 | B6 | Windows 导出流程 | 导出 exe（需 Export Templates）+ 后端打包。重点：`backend/` 目录要**随 exe 一起拷**（`res://` 里没有 `.py`），`BackendLauncher` 会找「exe 同级 `backend/main.py`」 |
 | B7 | 小窗口布局 | 最小窗口现在是 `WINDOW_MIN_W/H`（1024×640，随缩放），比它更小拖不动了。到 1024×640 时左侧参数栏会出现滚动条（功能正常，未细调）；嫌挤就调 `theme_palette.gd` 的 `SIDEBAR_W` / `WINDOW_MIN_*` |
 
-### E. 来自下游报告、**已记录待实现**（2026-09-22 用户决定暂缓，届时再挑）
+### E. 来自下游报告、**已记录待实现**（两批：2026-09-22 wlt_login / 2026-10-02 DeepScribe）
 
-来源：`wlt_login` 项目回流的报告（A 表「可以直接合入的控件与模块」+ C 表「建议新增的工程化资产」）。
+**第一批来源**：`wlt_login` 项目回流的报告（A 表「可以直接合入的控件与模块」+ C 表「建议新增的工程化资产」）。
 报告里的事实类条目（B 表）已经逐条核验并归档到 **`docs/godot-facts-verified.md`**；
 下面是**还没实现的代码/资产**，连同「实现时的要点与坑」一起记在这儿，免得下次重新推一遍。
 （原始报告中更细的清单——比如精简模板那 48 个模块的关闭列表——在 wlt_login 项目那边。）
+**第二批（E7~E11）**的来源与说明见表格下方。
 
 | # | 事项 | 实现要点 / 坑 |
 |---|---|---|
@@ -144,6 +145,16 @@
 | E4 | **`export_presets.cfg`**（带注释的最小 Windows 预设） | 模板现在完全没有，每个下游都要在编辑器里手点一遍。注意路径/图标这些别写死成本机绝对路径，否则下游生成即错 |
 | E5 | **打包脚本 `build.bat` + 导出后冒烟测试** | 冒烟测试的价值：headless 跑 N 帧 grep **引擎级 `ERROR`** —— 他们靠它抓到「所有贴图加载失败」，那是**导出日志里完全看不出来**的问题（导出成功、pck 正常，只有运行时才炸）。两个坑：① `.bat` 的三条硬约束见 `docs/godot-facts-verified.md` §5；② **导出后的 release 构建不执行 `--script`**（该文档 §11，待验），所以冒烟测试**不能**靠 `--script`，得跑导出的 exe 本身（如 `--quit-after N`）再 grep 输出 |
 | E6 | **精简引擎模板配方**（~104 MB → ~33 MB） | **✅ 配方已实测，见 `docs/slim-export-template.md`**（2026-09-23）。要点：官方 104.2 MB、命令行驱动 34.0 MB、`.gdbuild` 驱动 32.8 MB（同一份源码、同一个 pck 各跑 240 帧）；两者差异来自 core 开关 `disable_physics_2d` 等，且命令行那版会打 `Falling back to dummy PhysicsServer2D` 警告。**还没做的是 `disabled_classes`（类级裁剪）**，那个只有编辑器 GUI 能生成（无 CLI），收益未知。该文档里有完整开关清单（含**本项目绝不能关的 websocket**）、工具链、干跑验证法、探针法 |
+
+| E7 | `ColumnTable` 加 **`set_flex_column(i)`**：指定哪一列吸收剩余宽度（现在写死最后一列） | 动机：表格是 `[文件名, 状态, 操作]` 时，最后一列（操作）会独吞几百像素空档，而最该宽的文件名列被挤到最窄。要点：**`-1`（默认）= 最后一列**，保持现有行为逐像素不变；`_flex_index()` 要越界回退到最后一列，保证「总有且只有一列」吸收剩余宽度。**坑在拖拽**：把 flex 列从最右挪走后，`_gui_input()` 里「拖分隔线 = 改左边那列」的隐含假设就失效了 —— flex 在左时 `sep(1) = 表宽 − w₂` 跟 `w₁` 无关，用户抓住那条线拖会「线纹丝不动、隔壁那条在跑」。正确规则按 flex 位置分段：`line < flex` 改**左**边那列（`+delta`）、`line >= flex` 改**右**边那列（`-delta`），两段都保证被拖的线严格跟手；`flex == 最后一列` 时退化成原实现。上限统一写成「让 flex 列不小于 `TABLE_MIN_COL`」。下游已有实现 + 13 条断言（含「线严格跟手」「两侧到下限」三种边界） |
+| E8 | `TreeTable` 加**右键 / 上下文菜单信号**（如 `item_context_menu(item, at_position)`） | 现在只有 `item_selected` / `item_activated` / `item_toggled`，行级操作菜单（改这一行的参数、删除、重试）只能自己覆写 `_on_body_input()`。要点：非左键的事件**本来就会落到** `ColumnTable._gui_input()` 的 `else` 分支 → `_on_body_input()`，所以**不用改基类**；只对命中某一行的情况发信号（表头/空白不发）；`at_position` 给**表格自身坐标**，换算成全局坐标见 `docs/godot-facts-verified.md` §1f（`popup_on_parent` 那条）。顺带 `select()` 该行做视觉反馈 |
+| E9 | `TreeTableItem` 加**逐单元格配色与 tooltip**（`set_cell_color()` / `set_cell_tooltip()`） | 现在整行一个默认色、也没有逐格提示。两个都是刚需不是锦上添花：① 状态列按语义上色（等待中灰/解析中橙/完成绿/失败红），扫一眼就知道哪个出事了；② 长路径只能显示截断后的，悬停要看全。要点：逐单元格 tooltip 得覆写 `Control._get_tooltip(at_position) -> String`（官方虚函数，是 `get_tooltip()` 的默认返回值），配一个「按 x 命中第几列」的 `_col_at()`；「这个格子设过颜色没有」用 `color.a > 0` 判定，别另存一份状态 |
+| E10 | `FileDropZone`：**多文件 / 文件夹拖放**控件 | `FileDropBox` 是单文件语义（信号 `path_changed(path: String)`），而 `accept_dropped_files()` 收的是 `PackedStringArray`、实现里 `set_path(files[0])` —— **拖一批只生效第一个，其余静默丢掉**，用户看不出来。要点：三个入口（拖放一批 / 加单个文件 / 加文件夹递归扫），因为 `FileDialog` **不支持多选文件**；配色复用 `_add_drop_colors()` 与 `FileDropBox` 保持一致。下游那份 291 行，可整体给 |
+| E11 | `LogView` 加 **`debug` 级别** | 现在认 `ok` / `warn` / `error` / `system`；从 Python `logging` 过来的 `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` **一个都命不中**，调用方得自己做映射。加一档走 `TEXT_DIS` 即可。**顺带**：`LogView.append()` 内部**已经做过一次 BBCode 转义**（`[` → `[lb]`），调用方不要再转一次 —— 转两次会把 `[BLK:0]` 渲染成字面的 `[lb]BLK:0]`（这条值得写进它的文档注释） |
+
+> **E7~E11 来自 DeepScribe 项目 2026-10-02 的回流报告**，事实类条目已归档到
+> `docs/godot-facts-verified.md` §1f。**这一批没有一条是模板的缺陷** —— 反而是模板先修了
+> 滚动条样式盒那条（`content_margin = 0` ⇒ 0 宽滚动条），DeepScribe 是同步方。
 
 > 这几项都是**加法**（新控件 / 新模块 / 新资产），不影响现有功能；E1/E2/E3 是独立小件，
 > E4/E5/E6 属于「工程化资产」，做之前最好先定「模板要不要管打包和单实例」这个取向。

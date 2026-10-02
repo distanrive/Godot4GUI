@@ -76,6 +76,7 @@ func _build() -> void:
 		["表格与列表", "tables"],
 		["图表", "chart"],
 		["弹窗与菜单", "dialogs"],
+		["窗口与托盘", "window"],
 	]
 	for s in sections:
 		var b := Button.new()
@@ -130,6 +131,7 @@ func _show_section(id: String) -> void:
 			"tables": _section_tables()
 			"chart": _section_chart()
 			"dialogs": _section_dialogs()
+			"window": _section_window()
 		_section_box = null
 
 	# 只显示当前分类，隐藏其它
@@ -733,6 +735,52 @@ func _section_scrolling() -> void:
 	_section_box.add_child(_caption(
 		"表格要滚动不要这样套 —— 那会把表头一起滚走。用 DataTable/TreeTable 自己的"
 		+ " set_max_visible_rows() / set_max_height()，表头会钉住不动。"))
+
+
+func _section_window() -> void:
+	_section_box.add_child(_header("窗口与托盘 Window / Tray"))
+	_section_box.add_child(_caption(
+		"「关窗后从任务栏上消失、只留托盘图标」这件事 Godot 自己做不到：主窗口"
+		+ "（`get_tree().root`）没有父节点，`Window::set_visible()` 会直接 `ERR_FAIL`；"
+		+ "`DisplayServer` 也没有任何 hide 接口。模板自带一份极小的 GDExtension"
+		+ "（`tools/native_window/`）绕过引擎直接调 Win32 的 `ShowWindow`，"
+		+ "GDScript 侧的封装就是 `TrayWindow`。"
+		+ " 隐藏期间它还会把 `Engine.max_fps` 压到 10 —— 藏在托盘里待机一整天，没必要一直烤 GPU。"))
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+
+	var hide_btn := Button.new()
+	hide_btn.text = "隐藏 3 秒后自动回来"
+	hide_btn.theme_type_variation = "CapsuleButton"
+	hide_btn.disabled = not TrayWindow.available()
+
+	var state := Label.new()
+	state.theme_type_variation = "PathLabel"
+	state.text = "TrayWindow.available() → %s" % TrayWindow.available()
+
+	hide_btn.pressed.connect(func():
+		if not TrayWindow.hide():
+			state.text = "没藏成（available() 为 false，业务侧该退回「最小化到任务栏」）"
+			return
+		state.text = "已隐藏，3 秒后自动恢复……"
+		# **演示一定要能自己回来**：把窗口藏了却没人叫得回来，用户只能去任务管理器杀进程 ——
+		# 托盘图标不是每个场景都有。真实业务里"叫回来"那一下应该是托盘图标/菜单干的。
+		await get_tree().create_timer(3.0).timeout
+		TrayWindow.restore()
+		state.text = "已恢复（TrayWindow.is_hidden() → %s）" % TrayWindow.is_hidden())
+
+	row.add_child(hide_btn)
+	row.add_child(state)
+	_section_box.add_child(_card("TrayWindow（关窗后从任务栏消失）", row))
+
+	_section_box.add_child(_caption(
+		"用法见 `scripts/util/tray_window.gd`：`available()` 先探一下（缺 dll 时返回 false，"
+		+ "要退回最小化 —— 别假设一定能藏），然后 `hide()` / `restore()`。"
+		+ " 回归检查：`godot --path . --script res://tools/checks/tray_window.gd`"
+		+ "（要用窗口模式跑，headless 下那块会被跳过）。"
+		+ " 打包时别忘了 `bin/native_window.windows.x86_64.dll` 要跟 exe 放一起 ——"
+		+ "漏了不报错，只是功能静默降级。"))
 
 
 func _section_tables() -> void:

@@ -20,6 +20,8 @@
 ```
 {{PROJECT_NAME}}/
 ├── project.godot                 # 工程配置 + autoload + [backend] 段（渲染器 forward_plus + vulkan）
+├── native_window.gdextension     # 原生窗口扩展的清单（托盘隐藏用）
+├── bin/                          # 它的产物（*.dll）—— **必须跟 exe 一起分发**，漏了会静默降级
 ├── scenes/
 │   ├── app.tscn                  # 主场景（挂 scripts/app.gd）—— 你的业务界面
 │   └── gallery.tscn              # 控件/布局总览（开发期参照，可删）
@@ -36,7 +38,9 @@
 │   │   ├── theme_factory.gd      # 由令牌构建完整 Theme
 │   │   └── colormaps.gd          # 色标定义（rainbow/jet/gray）
 │   ├── ui/                       # 可复用控件（class_name，见下表）
-│   └── util/fmt.gd               # 数字格式化 Fmt（GDScript 的 % 不支持 %e/%g）
+│   └── util/
+│       ├── fmt.gd                # 数字格式化 Fmt（GDScript 的 % 不支持 %e/%g）
+│       └── tray_window.gd        # 托盘隐藏 TrayWindow（封装原生扩展）
 ├── themes/
 │   ├── icons/                    # 复选/箭头/滑块等图标（SVG）
 │   └── shaders/colormap.gdshader # 伪彩着色器（强度 → 色标，GPU 上色）

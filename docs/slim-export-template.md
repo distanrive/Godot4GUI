@@ -84,14 +84,33 @@ if "disabled_build_options" in ft:
 
 编译耗时：`-j20`、`lto=full`、`optimize=size_extra`，**3 分 34 秒**。
 
+### 2b. 后续一次完整实测（加开关 + 真正启用类裁剪）
+
+同一个 app、同一台机器，在上一版基础上：
+
+| 模板 | exe | 发布 rar（exe + pck + dll） |
+|---|---|---|
+| 上面那版（32.8 MB） | 32.8 MB | 8.6 MB |
+| + 本轮新增的开关（`deprecated` / `minizip` / `sdl` / `pcre2` 的 JIT / `disable_overrides`…） | 31.6 MB（−1.2，**−3.7%**） | 8.1 MB |
+| + **类级裁剪真正启用**（159 个类） | **29.4 MB（再 −2.2，−7.8%）** | **7.5 MB** |
+
+**这张表本身是结论**：`disabled_classes` 那一级的收益是选项那一级的**两倍多**。
+所以别只盯着「还能关哪个模块」—— 类列表才是大头（见 §3.2）。
+
+（`brotli` 那一项在这轮被错误地关过、又加了回来，只占 **0.3 MB**，理由见 §4.1。）
+
 ---
 
 ## 3. 两个杠杆：选项 vs 类
 
 ### 3.1 `disabled_build_options`（模块 / 特性开关）
 
-就是 SCons 选项，`env[c] = value` 直接生效。收益：**这是大头**（3D、音频、导航、XR、
-各种图片编解码、物理引擎……）。
+就是 SCons 选项，`env[c] = value` 直接生效。能关的面很宽（3D、音频、导航、XR、
+各种图片编解码、物理引擎……），**但收益比想象的小**：实测这一级只省 **3.7%**。
+
+原因是那些 `.o` 看着几十上百 MB，体积大头是**调试信息**，而 `lto=full` + 链接器的
+section GC 之后真正留在二进制里的没那么多。**别指望靠继续关模块把体积再砍一半** ——
+真正的大头是下一节。
 
 ### 3.2 `disabled_classes`（类级裁剪）——profile 独有的能力
 
@@ -104,12 +123,37 @@ if "disabled_build_options" in ft:
   再靠链接器的 section GC 把整份实现丢掉 ⇒ 真省体积。
 
 **实测确认这个杠杆从没被用过**：命令行那套编完后，`core/disabled_classes.gen.h`
-的内容**只有 `#pragma once`**（我这份手写的 profile 也没给类列表，所以仍是空的）。
+的内容**只有 `#pragma once`**（我那份手写的 profile 也没给类列表，所以仍是空的）。
+
+**真的用起来能省多少**：在同一个 app 上由编辑器 Detect 出 159 个类，实测
+**32.8 → 29.4 MB（−7.8%）**，是选项那一级（3.7%）的两倍多。值得做。
 
 **但类列表不该手写**：它靠「扫工程的场景与脚本，反推用到的类」，
 官方明列了盲区 —— 运行时**动态构造**的 GDScript、**表达式**里的用法、GDExtension、
-运行时加载的外部 pck，以及「某些边角情况」。**漏一个类 = 运行时才炸**，
-所以必须靠编辑器生成 + 导出后冒烟测。
+运行时加载的外部 pck，以及「某些边角情况」。
+
+**漏一个类的后果**（实测，比官方说的乐观一点）：绝大多数情况是**脚本解析失败**
+（`Identifier not declared`）—— 也就是**一启动就炸**，导出的冒烟测试必然抓到。
+真正危险的是「某个类只出现在很久才走一次的分支里」（本项目的例子是**定时指令的倒计时
+对话框**，只有到点才会构建），那种要手动触发一次才能验到。
+
+#### 3.2.1 每次重新 Detect 之后必须回来核对这四条
+
+profile 是 GUI 生成的，**Save As 会整份覆盖**，而这四条每次都可能被它写坏：
+
+1. **渲染相关的开关必须与工程一致。** Detect 是**照着工程当时的状态**判断的：
+   如果你刚调过 `rendering_method`（比如试 `gl_compatibility`），它会顺手把
+   `forward_plus_renderer` / `rendering_device` / `vulkan` 判成「用不到」并写成 `false`，
+   编出来的模板就跑不了 forward_plus —— **而且要到导出后才暴露**。
+2. **`GDExtension` 不能留在禁用表里。** 检测器只看工程里的场景与脚本，
+   **看不到「我们运行时会加载 `*.gdextension`」** —— 官方文档把 GDExtension
+   列为检测盲区之一，而本项目真的带了一份（`tools/native_window/`）。
+   禁掉它等于自废武功。
+3. **值的语义是「这个选项最终取什么值」**，不是「禁用与否」：
+   `module_openxr_enabled: false` = 关掉；`disable_3d: true` = 打开这个开关。别反着读。
+4. **类裁剪的验证只能用导出版。** 编辑器跑的是**编辑器本体**（自带全部类），
+   所以 `--import`、跑 gallery、`--quit-after` **都证明不了模板是好的**。
+   必须导出后跑真实 exe（本项目是 `build.bat test` 的冒烟测试 + 再手动跑一次界面）。
 
 生成方式（**只有 GUI，没有 CLI** —— 我查过编辑器 `--help` 没有相关选项）：
 
@@ -136,6 +180,7 @@ if "disabled_build_options" in ft:
 | **`module_websocket_enabled=yes`** | **NetClient 废掉**（`WebSocketPeer` 类不存在，autoload 启动即报错）。**本项目必须开** |
 | `module_svg_enabled=yes` | `themes/icons/*.svg` 全失效 |
 | `module_webp_enabled=yes` | **所有贴图运行时加载失败**：Godot 的「无损」纹理导入（`compress/mode=0`）内部用 WebP 存 `.ctex`。官方「可关模块」清单里**故意没有它**（全文档搜不到 `module_webp`），别自己加 |
+| **`brotli`（别写 `brotli=no`）** | **所有内置字体加载失败**：内置字体（`Inter_*`、中文兜底的 `DroidSansFallback`）都是 WOFF2，解压靠 FreeType + brotli。关掉后文字**静默退化成 Windows 系统字体**（英文数字变衬线体、中文变宋体的细笔画），日志一行错都不报。只占 **0.3 MB** —— 撞过一次，详见 `godot-facts-verified.md` 的 16b |
 | `module_text_server_adv_enabled=yes` | 界面全是中文，要靠 adv 做排版；官方警告配 `text_server_fb_enabled=yes` 才不至于没文本系统，但 fb 对 CJK 没把握 |
 | `module_freetype_enabled=yes`、`module_glslang_enabled=yes`、`module_gdscript_enabled=yes` | 字体渲染、运行时着色器编译、脚本 |
 | `opengl3`（驱动） | Vulkan 不可用时（RDP/虚拟机/老核显）的兜底 |
@@ -247,12 +292,24 @@ custom_template/debug="D:/godot-build/out/<项目>_template_debug.exe"
   （`SCRIPT ERROR` / `ERROR:`）—— 这也是 wlt_login 的 `build.bat` 的做法。
   它能抓到「导出日志里完全看不出来」的问题（例如所有贴图加载失败）。
 
+**类裁剪过之后要额外多验一步**：漏掉一个类的典型表现是**脚本解析失败**（一启动就炸），
+冒烟测必抓；但**只出现在冷分支里的类**（本项目的例子是「定时指令的倒计时对话框」，
+只有到点才构建）冒烟测跑不到。所以启用类裁剪、或改动过 `.gdbuild` 之后，
+除了冒烟测，还要**手动把那条最远的分支走一遍**。
+
+另外，界面类的裁剪**用眼睛看比看日志有用**：`brotli=no` 那次日志干干净净，
+但所有中文字都换成了宋体 —— 只有截图对比才发现得了。
+
 ---
 
 ## 7. 还没验证的
 
-- **`disabled_classes` 到底能再省多少**：未知（§3.2 的杠杆从未启用）。
-  拿到编辑器 detect 出来的 profile 后，按 §5 编一次、按 §6 冒烟测，就能得到实测数字。
+- ~~**`disabled_classes` 到底能再省多少**~~ —— **已验证：−7.8%**（32.8 → 29.4 MB，
+  159 个类）。数字与四条注意事项见 §2b / §3.2.1。
+- **再往下还能省多少**：没测。已知还有两条路，都要付代价：
+  `vulkan=no`（再省 2.6 MB，但要连带把工程改成 `gl_compatibility`，动了渲染路径）；
+  UPX（压得更狠，但会破坏内嵌 PCK 与图标替换，而且报毒）。
+  另一条没试的是**继续缩小类列表**（把「很少走的分支」也赌进去），收益未知、风险自负。
 - **两份模板在同项目上的帧率/启动时间差异**：没测（理论上关掉的功能不影响 UI 路径）。
 - **在线生成器（[godot-build-options-generator](https://godot-build-options-generator.github.io)）
   是否支持 4.7**：**确认不了** —— 本环境 WebFetch 对任何域名都失败（Claude Code 自己的
